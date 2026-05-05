@@ -1,0 +1,61 @@
+# Examples are added in later tasks.
+
+[package]
+name = "lookout"
+version = "0.1.0"
+edition = "2021"
+description = "Streaming visualizer with MCP interface"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
+
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+ratatui-image = "4"
+tui-tree-widget = "0.23"
+
+# MCP
+rmcp = { version = "1", features = ["server", "transport-streamable-http-server", "macros"] }
+
+# Serde / schema
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+
+# Domain helpers
+similar = "2"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+indexmap = { version = "2", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Plot rendering (chart-quality PNGs)
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "all_series"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# Filesystem dirs
+directories = "5"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Errors
+thiserror = "1"
+anyhow = "1"
+
+# Image decoding
+base64 = "0.22"
+image = "0.25"
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml", "json"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
