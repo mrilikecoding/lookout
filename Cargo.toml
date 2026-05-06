@@ -3,6 +3,9 @@ name = "lookout"
 version = "0.1.0"
 edition = "2021"
 description = "Streaming visualizer with MCP interface"
+license = "MIT"
+repository = "https://github.com/mrilikecoding/lookout"
+readme = "README.md"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
