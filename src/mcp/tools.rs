@@ -214,6 +214,29 @@ pub struct RawTreeNode {
     pub children: Vec<RawTreeNode>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ShowDiffArgs {
+    /// The before string.
+    pub before: String,
+    /// The after string.
+    pub after: String,
+    /// Programming language for syntax highlighting.
+    #[serde(default)]
+    pub language: Option<String>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RawStatusField {
     /// Label for the field.
@@ -599,6 +622,34 @@ impl LookoutServer {
         };
         let card = self
             .push_card(common, CardKind::Tree { root })
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Push a unified diff card. Pass `before`/`after` strings; `language` enables syntax highlighting.
+    #[tool(description = "Push a unified diff card. Pass `before`/`after` strings; `language` enables syntax highlighting.")]
+    pub async fn show_diff(
+        &self,
+        Parameters(args): Parameters<ShowDiffArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let kind = CardKind::Diff {
+            before: args.before,
+            after: args.after,
+            language: args.language,
+        };
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(common, kind)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
