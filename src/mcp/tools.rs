@@ -265,6 +265,34 @@ pub struct ShowImageArgs {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ShowProgressArgs {
+    /// Unique identifier for this progress series; subsequent pushes with the same `id` replace the prior progress card in its pin slot.
+    pub id: String,
+    /// Short label describing what is being tracked.
+    pub label: String,
+    /// Current progress value (arbitrary numeric units).
+    pub current: f64,
+    /// Optional total value; if unset, progress is interpreted as an absolute quantity.
+    #[serde(default)]
+    pub total: Option<f64>,
+    /// Optional status text (e.g., "uploading", "complete").
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card. If unset, defaults to `progress:<id>`.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RawStatusField {
     /// Label for the field.
@@ -734,6 +762,36 @@ impl LookoutServer {
                     source,
                 },
             )
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Push a progress card. Subsequent pushes with the same `id` replace the prior progress card in its pin slot. `current` and optional `total` are arbitrary numeric units.
+    #[tool(description = "Push a progress card. Subsequent pushes with the same `id` replace the prior progress card in its pin slot. `current` and optional `total` are arbitrary numeric units.")]
+    pub async fn show_progress(
+        &self,
+        Parameters(args): Parameters<ShowProgressArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let kind = CardKind::Progress {
+            progress_id: args.id,
+            label: args.label,
+            current: args.current,
+            total: args.total,
+            status: args.status,
+        };
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(common, kind)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
