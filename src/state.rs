@@ -133,6 +133,44 @@ impl AppState {
     }
 }
 
+use tokio::sync::{broadcast, mpsc};
+
+/// Commands sent to the state task. The state task is the single writer
+/// for AppState; everything else is read-only.
+#[derive(Debug, Clone)]
+pub enum Command {
+    PushCard(Card),
+    Unpin { slot: String },
+    ClearFeed,
+    SetSessionLabel {
+        session: SessionId,
+        label: String,
+        color: Option<u8>,
+    },
+}
+
+/// Run the state task. Returns when the command sender is dropped.
+pub async fn state_task(
+    mut state: AppState,
+    mut cmds: mpsc::Receiver<Command>,
+    deltas_tx: broadcast::Sender<StateDelta>,
+) {
+    while let Some(cmd) = cmds.recv().await {
+        let new_deltas = match cmd {
+            Command::PushCard(card) => state.push(card),
+            Command::Unpin { slot } => state.unpin(&slot).into_iter().collect(),
+            Command::ClearFeed => vec![state.clear_feed()],
+            Command::SetSessionLabel { session, label, color } => {
+                vec![state.set_session_label(&session, label, color)]
+            }
+        };
+        for d in new_deltas {
+            // Lagged subscribers will miss; UI handles that via Lagged() recv error.
+            let _ = deltas_tx.send(d);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
