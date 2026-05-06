@@ -3,7 +3,7 @@
 use crate::card::Card;
 use crate::error::Result;
 use crate::state::StateDelta;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -100,9 +100,15 @@ impl TuiApp {
                 if let Event::Key(KeyEvent {
                     code,
                     kind: KeyEventKind::Press,
+                    modifiers,
                     ..
                 }) = event::read()?
                 {
+                    // Ctrl-C — quit regardless of mode (including filter prompt).
+                    if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('c') {
+                        return Ok(());
+                    }
+
                     // Filter-prompt mode: route keys to the input buffer.
                     if let Some(buf) = self.filter_prompt.as_mut() {
                         match code {
@@ -127,6 +133,24 @@ impl TuiApp {
                     } else {
                         match code {
                             KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char(c @ '1'..='9') => {
+                                let idx = (c as u8 - b'1') as usize;
+                                let snap = self.snapshot.lock().unwrap();
+                                let mut sessions: Vec<String> = snap
+                                    .feed
+                                    .iter()
+                                    .map(|c| c.session.clone())
+                                    .collect::<std::collections::HashSet<_>>()
+                                    .into_iter()
+                                    .collect();
+                                sessions.sort();
+                                drop(snap);
+                                if let Some(s) = sessions.get(idx).cloned() {
+                                    if !self.filter.sessions.remove(&s) {
+                                        self.filter.sessions.insert(s);
+                                    }
+                                }
+                            }
                             KeyCode::Char('j') | KeyCode::Down => {
                                 let len = self.snapshot.lock().unwrap().feed.len();
                                 if self.focused_idx + 1 < len {
@@ -216,13 +240,14 @@ fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded:
         .split(f.area());
     crate::tui::header::render(f, chunks[0], snap);
 
-    let all_sessions: Vec<String> = snap
+    let mut all_sessions: Vec<String> = snap
         .feed
         .iter()
         .map(|c| c.session.clone())
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
+    all_sessions.sort();
     crate::tui::filter::render(f, chunks[1], &all_sessions, filter, prompt);
 
     // Split body into feed (70%) and pin sidebar (30%).
