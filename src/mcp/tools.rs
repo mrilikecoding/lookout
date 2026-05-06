@@ -11,6 +11,7 @@ use rmcp::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use tokio::sync::mpsc;
 
 use chrono::DateTime;
@@ -105,6 +106,31 @@ pub struct ShowQuestionArgs {
     /// Optional context or explanation.
     #[serde(default)]
     pub context: Option<String>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ShowTableArgs {
+    /// Either a list of row objects (column names inferred from union of keys, in first-seen order)...
+    #[serde(default)]
+    pub rows: Option<Vec<serde_json::Map<String, JsonValue>>>,
+    /// ...or a CSV blob.
+    #[serde(default)]
+    pub csv: Option<String>,
+    /// Optional explicit column order. Required if neither side has columns.
+    #[serde(default)]
+    pub columns: Option<Vec<String>>,
     /// Optional card title.
     #[serde(default)]
     pub title: Option<String>,
@@ -352,9 +378,133 @@ impl LookoutServer {
             format!("ok:{uuid}"),
         )]))
     }
+
+    /// Push a table card. Provide `rows` (array of objects) or `csv` (string). `columns` overrides inferred order.
+    #[tool(description = "Push a table card. Provide `rows` (array of objects) or `csv` (string). `columns` overrides inferred order.")]
+    pub async fn show_table(
+        &self,
+        Parameters(args): Parameters<ShowTableArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let (columns, rows) = match (&args.rows, &args.csv, &args.columns) {
+            (Some(rows), _, explicit) => infer_table_from_rows(rows, explicit.as_deref()),
+            (None, Some(csv), explicit) => parse_csv(csv, explicit.as_deref())
+                .map_err(|m| ErrorData::invalid_params(m, None))?,
+            (None, None, _) => {
+                return Err(ErrorData::invalid_params(
+                    "must provide `rows` or `csv`",
+                    None,
+                ))
+            }
+        };
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(common, CardKind::Table { columns, rows })
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
 }
 
 // ── ServerHandler wiring ──────────────────────────────────────────────────────
 
 #[tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for LookoutServer {}
+
+// ── Table helpers ─────────────────────────────────────────────────────────
+
+fn infer_table_from_rows(
+    rows: &[serde_json::Map<String, JsonValue>],
+    explicit: Option<&[String]>,
+) -> (Vec<String>, Vec<Vec<JsonValue>>) {
+    let columns: Vec<String> = match explicit {
+        Some(c) => c.to_vec(),
+        None => {
+            let mut seen = Vec::new();
+            for r in rows {
+                for k in r.keys() {
+                    if !seen.iter().any(|s: &String| s == k) {
+                        seen.push(k.clone());
+                    }
+                }
+            }
+            seen
+        }
+    };
+    let body: Vec<Vec<JsonValue>> = rows
+        .iter()
+        .map(|r| {
+            columns
+                .iter()
+                .map(|c| r.get(c).cloned().unwrap_or(JsonValue::Null))
+                .collect()
+        })
+        .collect();
+    (columns, body)
+}
+
+fn parse_csv(
+    csv: &str,
+    explicit: Option<&[String]>,
+) -> std::result::Result<(Vec<String>, Vec<Vec<JsonValue>>), String> {
+    let mut lines = csv.lines();
+    let header_line = lines
+        .next()
+        .ok_or_else(|| "csv is empty".to_string())?;
+    let header: Vec<String> = match explicit {
+        Some(cols) => cols.to_vec(),
+        None => header_line.split(',').map(str::trim).map(String::from).collect(),
+    };
+    let body: Vec<Vec<JsonValue>> = lines
+        .map(|line| {
+            line.split(',')
+                .map(|cell| JsonValue::String(cell.trim().to_string()))
+                .collect()
+        })
+        .collect();
+    Ok((header, body))
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+
+    #[test]
+    fn rows_infer_columns_in_first_seen_order() {
+        let rows = vec![
+            {
+                let mut m = serde_json::Map::new();
+                m.insert("id".into(), JsonValue::from(1));
+                m.insert("name".into(), JsonValue::from("a"));
+                m
+            },
+            {
+                let mut m = serde_json::Map::new();
+                m.insert("name".into(), JsonValue::from("b"));
+                m.insert("score".into(), JsonValue::from(0.5));
+                m
+            },
+        ];
+        let (cols, body) = infer_table_from_rows(&rows, None);
+        assert_eq!(cols, vec!["id", "name", "score"]);
+        assert_eq!(body[0][0], JsonValue::from(1));
+        assert_eq!(body[1][0], JsonValue::Null);
+        assert_eq!(body[1][2], JsonValue::from(0.5));
+    }
+
+    #[test]
+    fn csv_parses_simple_input() {
+        let (cols, body) = parse_csv("a,b\n1,2\n3,4", None).unwrap();
+        assert_eq!(cols, vec!["a", "b"]);
+        assert_eq!(body.len(), 2);
+        assert_eq!(body[0][0], JsonValue::from("1"));
+    }
+}
