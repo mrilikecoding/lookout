@@ -4,7 +4,8 @@ pub mod question;
 pub mod status;
 pub mod table;
 pub mod text;
-// Future: tree, diff, image, progress.
+pub mod tree;
+// Future: diff, image, progress.
 
 use crate::card::{Card, CardKind};
 use ratatui::layout::Rect;
@@ -24,12 +25,12 @@ pub fn render_body(f: &mut Frame, area: Rect, card: &Card) {
         CardKind::Chart { kind, series, x_label, y_label } => chart::render(
             f, area, *kind, series, x_label.as_deref(), y_label.as_deref(),
         ),
+        CardKind::Tree { root } => tree::render(f, area, root),
         // Other variants render a placeholder until later tasks fill them in.
         _ => {
             use ratatui::text::Line;
             use ratatui::widgets::Paragraph;
             let kind = match &card.kind {
-                CardKind::Tree { .. } => "tree",
                 CardKind::Diff { .. } => "diff",
                 CardKind::Image { .. } => "image",
                 CardKind::Progress { .. } => "progress",
