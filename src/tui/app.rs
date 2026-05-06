@@ -107,7 +107,18 @@ impl TuiApp {
 
             // Render.
             terminal.draw(|f| {
-                draw(f, &snap, self.feed_focused_idx, self.expanded, &self.filter, self.filter_prompt.as_deref())
+                draw(
+                    f,
+                    &snap,
+                    self.focus,
+                    self.pin_focused_idx,
+                    self.feed_focused_idx,
+                    self.expanded,
+                    self.zoomed_pin.as_deref(),
+                    self.feed_compact,
+                    &self.filter,
+                    self.filter_prompt.as_deref(),
+                )
             })?;
 
             // Poll for keyboard or sleep until next tick.
@@ -244,17 +255,34 @@ impl TuiApp {
     }
 }
 
-fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded: Option<crate::card::CardId>, filter: &crate::tui::filter::FilterState, prompt: Option<&str>) {
+#[allow(clippy::too_many_arguments)]
+fn draw(
+    f: &mut ratatui::Frame,
+    snap: &UiSnapshot,
+    focus: FocusRegion,
+    pin_focused_idx: usize,
+    feed_focused_idx: usize,
+    expanded: Option<crate::card::CardId>,
+    zoomed_pin: Option<&str>,
+    feed_compact: bool,
+    filter: &crate::tui::filter::FilterState,
+    prompt: Option<&str>,
+) {
+    // Vertical: header (1) + filter bar (1) + canvas (rest minus feed) + feed.
+    let feed_height: u16 = if feed_compact { 3 } else { 14 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // header
-            Constraint::Length(1),  // filter bar
-            Constraint::Min(1),     // body
+            Constraint::Length(1),           // header
+            Constraint::Length(1),           // filter bar
+            Constraint::Min(5),              // pin canvas
+            Constraint::Length(feed_height), // feed (compact or expanded)
         ])
         .split(f.area());
+
     crate::tui::header::render(f, chunks[0], snap);
 
+    // Filter bar input.
     let mut all_sessions: Vec<String> = snap
         .feed
         .iter()
@@ -265,44 +293,61 @@ fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded:
     all_sessions.sort();
     crate::tui::filter::render(f, chunks[1], &all_sessions, filter, prompt);
 
-    // Split body into feed (70%) and pin sidebar (30%).
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(chunks[2]);
+    // Pin canvas (main area).
+    let pin_focus = if focus == FocusRegion::Pins {
+        Some(pin_focused_idx)
+    } else {
+        None
+    };
+    crate::tui::pins::render(
+        f,
+        chunks[2],
+        crate::tui::pins::PinView {
+            pins: &snap.pins,
+            focused: pin_focus,
+            zoomed: zoomed_pin,
+        },
+    );
 
-    let filtered: Vec<Card> = snap.feed.iter().filter(|c| filter.matches(c)).cloned().collect();
+    // Feed area.
+    let filtered: Vec<crate::card::Card> = snap
+        .feed
+        .iter()
+        .filter(|c| filter.matches(c))
+        .cloned()
+        .collect();
 
-    if let Some(id) = expanded {
+    if feed_compact {
+        crate::tui::feed::render_compact(f, chunks[3], &filtered, 3);
+    } else if let Some(id) = expanded {
+        // Expanded feed AND a focused-card body view.
         if let Some(card) = filtered.iter().find(|c| c.id == id) {
-            // Render the card's body in the feed area, with a title bar.
             use ratatui::widgets::{Block, Borders};
-            let block = Block::default().borders(Borders::ALL).title(format!("▾ {}", card.title.as_deref().unwrap_or("(no title)")));
-            let inner = block.inner(body[0]);
-            f.render_widget(block, body[0]);
+            let block = Block::default().borders(Borders::ALL).title(format!(
+                "▾ {}",
+                card.title.as_deref().unwrap_or("(no title)")
+            ));
+            let inner = block.inner(chunks[3]);
+            f.render_widget(block, chunks[3]);
             crate::tui::render::render_body(f, inner, card);
         } else {
-            // Card not found (evicted?) — fall back to feed.
-            crate::tui::feed::render(f, body[0], crate::tui::feed::FeedView { cards: &filtered, focused: focused_idx });
+            crate::tui::feed::render(
+                f,
+                chunks[3],
+                crate::tui::feed::FeedView {
+                    cards: &filtered,
+                    focused: feed_focused_idx,
+                },
+            );
         }
     } else {
         crate::tui::feed::render(
             f,
-            body[0],
+            chunks[3],
             crate::tui::feed::FeedView {
                 cards: &filtered,
-                focused: focused_idx,
+                focused: feed_focused_idx,
             },
         );
     }
-
-    crate::tui::pins::render(
-        f,
-        body[1],
-        crate::tui::pins::PinView {
-            pins: &snap.pins,
-            focused: None,
-            zoomed: None,
-        },
-    );
 }
