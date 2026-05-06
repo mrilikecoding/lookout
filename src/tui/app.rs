@@ -10,9 +10,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders};
 use ratatui::Terminal;
 use std::io::Stdout;
 use std::sync::{Arc, Mutex};
@@ -101,11 +99,7 @@ fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(1)])
         .split(f.area());
-    let header = Line::from(vec![
-        Span::styled("lookout ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(format!("— {} — feed: {}", snap.url, snap.feed.len())),
-    ]);
-    f.render_widget(Paragraph::new(header), chunks[0]);
+    crate::tui::header::render(f, chunks[0], snap);
     let body = Block::default().borders(Borders::ALL).title("feed");
     f.render_widget(body, chunks[1]);
 }
