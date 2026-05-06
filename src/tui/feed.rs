@@ -53,3 +53,35 @@ pub fn card_kind_label(k: &CardKind) -> &'static str {
         CardKind::Question { .. } => "question",
     }
 }
+
+/// Render the most recent feed cards as a compact ticker — one card per line,
+/// newest at top, capped at `max_lines`. No focus highlight; this is glance-only.
+pub fn render_compact(f: &mut Frame, area: Rect, cards: &[Card], max_lines: usize) {
+    let items: Vec<ListItem> = cards
+        .iter()
+        .rev() // newest first
+        .take(max_lines)
+        .map(|c| {
+            let kind = card_kind_label(&c.kind);
+            let title = c.title.as_deref().unwrap_or("");
+            let ts = c.created_at.format("%H:%M:%S").to_string();
+            let line = Line::from(vec![
+                Span::raw(format!("[{ts}] ")),
+                Span::styled(
+                    format!("●{} ", c.session),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(
+                    format!("{kind:<8} "),
+                    Style::default().fg(Color::Blue),
+                ),
+                Span::raw("▸ "),
+                Span::raw(title.to_string()),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Feed (g to expand)"));
+    f.render_widget(list, area);
+}
