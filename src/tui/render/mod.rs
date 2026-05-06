@@ -1,8 +1,9 @@
 pub mod log;
 pub mod question;
 pub mod status;
+pub mod table;
 pub mod text;
-// Future: table, chart, tree, diff, image, progress.
+// Future: chart, tree, diff, image, progress.
 
 use crate::card::{Card, CardKind};
 use ratatui::layout::Rect;
@@ -18,12 +19,12 @@ pub fn render_body(f: &mut Frame, area: Rect, card: &Card) {
         CardKind::Question { question, options, context } => {
             question::render(f, area, question, options, context.as_deref())
         }
+        CardKind::Table { columns, rows } => table::render(f, area, columns, rows),
         // Other variants render a placeholder until later tasks fill them in.
         _ => {
             use ratatui::text::Line;
             use ratatui::widgets::Paragraph;
             let kind = match &card.kind {
-                CardKind::Table { .. } => "table",
                 CardKind::Chart { .. } => "chart",
                 CardKind::Tree { .. } => "tree",
                 CardKind::Diff { .. } => "diff",
