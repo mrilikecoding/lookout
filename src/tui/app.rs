@@ -31,6 +31,7 @@ pub struct TuiApp {
     /// (We pass a closure to keep the AppState ownership in the state task.)
     refresh: Arc<dyn Fn() -> UiSnapshot + Send + Sync>,
     focused_idx: usize,
+    expanded: Option<crate::card::CardId>,
 }
 
 impl TuiApp {
@@ -44,6 +45,7 @@ impl TuiApp {
             deltas,
             refresh,
             focused_idx: 0,
+            expanded: None,
         }
     }
 
@@ -81,7 +83,7 @@ impl TuiApp {
             }
 
             // Render.
-            terminal.draw(|f| draw(f, &snap, self.focused_idx))?;
+            terminal.draw(|f| draw(f, &snap, self.focused_idx, self.expanded))?;
 
             // Poll for keyboard or sleep until next tick.
             if event::poll(tick)? {
@@ -104,6 +106,25 @@ impl TuiApp {
                                 self.focused_idx -= 1;
                             }
                         }
+                        KeyCode::Char('o') | KeyCode::Enter => {
+                            let snap = self.snapshot.lock().unwrap();
+                            if !snap.feed.is_empty() {
+                                // Newest at top: card at displayed index `i` is feed[len - 1 - i].
+                                let len = snap.feed.len();
+                                let idx = self.focused_idx.min(len - 1);
+                                let card_idx = len - 1 - idx;
+                                let id = snap.feed[card_idx].id;
+                                drop(snap);
+                                if self.expanded == Some(id) {
+                                    self.expanded = None;
+                                } else {
+                                    self.expanded = Some(id);
+                                }
+                            }
+                        }
+                        KeyCode::Esc => {
+                            self.expanded = None;
+                        }
                         _ => {}
                     }
                 }
@@ -112,7 +133,7 @@ impl TuiApp {
     }
 }
 
-fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize) {
+fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded: Option<crate::card::CardId>) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(1)])
@@ -125,14 +146,28 @@ fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize) {
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
         .split(chunks[1]);
 
-    crate::tui::feed::render(
-        f,
-        body[0],
-        crate::tui::feed::FeedView {
-            cards: &snap.feed,
-            focused: focused_idx,
-        },
-    );
+    if let Some(id) = expanded {
+        if let Some(card) = snap.feed.iter().find(|c| c.id == id) {
+            // Render the card's body in the feed area, with a title bar.
+            use ratatui::widgets::{Block, Borders};
+            let block = Block::default().borders(Borders::ALL).title(format!("▾ {}", card.title.as_deref().unwrap_or("(no title)")));
+            let inner = block.inner(body[0]);
+            f.render_widget(block, body[0]);
+            crate::tui::render::render_body(f, inner, card);
+        } else {
+            // Card not found (evicted?) — fall back to feed.
+            crate::tui::feed::render(f, body[0], crate::tui::feed::FeedView { cards: &snap.feed, focused: focused_idx });
+        }
+    } else {
+        crate::tui::feed::render(
+            f,
+            body[0],
+            crate::tui::feed::FeedView {
+                cards: &snap.feed,
+                focused: focused_idx,
+            },
+        );
+    }
 
     // Pin sidebar placeholder (Task 30 fills this in).
     let pin_block = ratatui::widgets::Block::default()
