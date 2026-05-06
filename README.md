@@ -31,10 +31,15 @@ Lookout exposes 13 tools: `show_text`, `show_table`, `show_chart`, `show_tree`,
 
 ## Keybindings
 
-    j / k or arrows   move focus
-    o / Enter         expand / collapse focused card
-    Esc               collapse / cancel filter prompt
-    p / P             pin / unpin focused card
+    Tab               toggle focus region (Pins ↔ Feed)
+    j / k or arrows   move focus within active region
+    o / Enter         expand focused card / zoom focused pin
+    Esc               exit zoom / collapse expand / cancel filter prompt
+    x                 remove focused pin (Pins region)
+    Alt-1 … Alt-9     remove pin by visible index
+    p / P             pin / unpin focused feed card
+    g                 toggle feed: ticker (3 lines) ↔ expanded (~14 lines)
+    G                 jump focus into the feed (and expand it)
     /                 filter prompt (title substring)
     1–9               toggle session-chip filters
     c                 clear feed (pins remain)
