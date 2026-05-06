@@ -32,6 +32,7 @@ pub struct TuiApp {
     refresh: Arc<dyn Fn() -> UiSnapshot + Send + Sync>,
     focused_idx: usize,
     expanded: Option<crate::card::CardId>,
+    filter: crate::tui::filter::FilterState,
 }
 
 impl TuiApp {
@@ -46,6 +47,7 @@ impl TuiApp {
             refresh,
             focused_idx: 0,
             expanded: None,
+            filter: crate::tui::filter::FilterState::default(),
         }
     }
 
@@ -83,7 +85,7 @@ impl TuiApp {
             }
 
             // Render.
-            terminal.draw(|f| draw(f, &snap, self.focused_idx, self.expanded))?;
+            terminal.draw(|f| draw(f, &snap, self.focused_idx, self.expanded, &self.filter))?;
 
             // Poll for keyboard or sleep until next tick.
             if event::poll(tick)? {
@@ -133,21 +135,36 @@ impl TuiApp {
     }
 }
 
-fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded: Option<crate::card::CardId>) {
+fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded: Option<crate::card::CardId>, filter: &crate::tui::filter::FilterState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(1),  // header
+            Constraint::Length(1),  // filter bar
+            Constraint::Min(1),     // body
+        ])
         .split(f.area());
     crate::tui::header::render(f, chunks[0], snap);
+
+    let all_sessions: Vec<String> = snap
+        .feed
+        .iter()
+        .map(|c| c.session.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    crate::tui::filter::render(f, chunks[1], &all_sessions, filter);
 
     // Split body into feed (70%) and pin sidebar (30%).
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(chunks[1]);
+        .split(chunks[2]);
+
+    let filtered: Vec<Card> = snap.feed.iter().filter(|c| filter.matches(c)).cloned().collect();
 
     if let Some(id) = expanded {
-        if let Some(card) = snap.feed.iter().find(|c| c.id == id) {
+        if let Some(card) = filtered.iter().find(|c| c.id == id) {
             // Render the card's body in the feed area, with a title bar.
             use ratatui::widgets::{Block, Borders};
             let block = Block::default().borders(Borders::ALL).title(format!("▾ {}", card.title.as_deref().unwrap_or("(no title)")));
@@ -156,14 +173,14 @@ fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded:
             crate::tui::render::render_body(f, inner, card);
         } else {
             // Card not found (evicted?) — fall back to feed.
-            crate::tui::feed::render(f, body[0], crate::tui::feed::FeedView { cards: &snap.feed, focused: focused_idx });
+            crate::tui::feed::render(f, body[0], crate::tui::feed::FeedView { cards: &filtered, focused: focused_idx });
         }
     } else {
         crate::tui::feed::render(
             f,
             body[0],
             crate::tui::feed::FeedView {
-                cards: &snap.feed,
+                cards: &filtered,
                 focused: focused_idx,
             },
         );
