@@ -3,3 +3,4 @@ pub mod error;
 pub mod imagepaths;
 pub mod mcp;
 pub mod state;
+pub mod tui;
