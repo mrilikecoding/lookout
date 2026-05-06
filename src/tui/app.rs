@@ -168,6 +168,19 @@ impl TuiApp {
                                     FocusRegion::Feed => FocusRegion::Pins,
                                 };
                             }
+                            KeyCode::Char(c @ '1'..='9') if modifiers.contains(KeyModifiers::ALT) => {
+                                let idx = (c as u8 - b'1') as usize;
+                                let snap = self.snapshot.lock().unwrap();
+                                if let Some((slot, _)) = snap.pins.get(idx).cloned() {
+                                    drop(snap);
+                                    if self.zoomed_pin.as_deref() == Some(slot.as_str()) {
+                                        self.zoomed_pin = None;
+                                    }
+                                    let _ = self
+                                        .cmd_tx
+                                        .try_send(crate::state::Command::Unpin { slot });
+                                }
+                            }
                             KeyCode::Char(c @ '1'..='9') => {
                                 let idx = (c as u8 - b'1') as usize;
                                 let snap = self.snapshot.lock().unwrap();
