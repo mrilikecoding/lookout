@@ -366,9 +366,13 @@ impl LookoutServer {
     ) -> std::result::Result<Card, crate::error::Error> {
         let card = Card::build(common, (self.default_session)(), kind);
         self.cmds
-            .send(Command::PushCard(card.clone()))
-            .await
-            .map_err(|_| crate::error::Error::Internal("state task has shut down".into()))?;
+            .try_send(Command::PushCard(card.clone()))
+            .map_err(|e| match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => crate::error::Error::Overloaded,
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    crate::error::Error::Internal("state task closed".into())
+                }
+            })?;
         Ok(card)
     }
 }
@@ -828,9 +832,15 @@ impl LookoutServer {
         Parameters(args): Parameters<UnpinArgs>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         self.cmds
-            .send(Command::Unpin { slot: args.slot.clone() })
-            .await
-            .map_err(|_| ErrorData::internal_error("overloaded", None))?;
+            .try_send(Command::Unpin { slot: args.slot.clone() })
+            .map_err(|e| match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    ErrorData::internal_error("lookout overloaded", None)
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    ErrorData::internal_error("state task closed", None)
+                }
+            })?;
         Ok(CallToolResult::success(vec![rmcp::model::Content::text(
             format!("ok:{}", args.slot),
         )]))
@@ -843,9 +853,15 @@ impl LookoutServer {
         Parameters(_args): Parameters<ClearFeedArgs>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         self.cmds
-            .send(Command::ClearFeed)
-            .await
-            .map_err(|_| ErrorData::internal_error("overloaded", None))?;
+            .try_send(Command::ClearFeed)
+            .map_err(|e| match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    ErrorData::internal_error("lookout overloaded", None)
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    ErrorData::internal_error("state task closed", None)
+                }
+            })?;
         Ok(CallToolResult::success(vec![rmcp::model::Content::text("ok")]))
     }
 
@@ -856,13 +872,19 @@ impl LookoutServer {
         Parameters(args): Parameters<SetSessionLabelArgs>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         self.cmds
-            .send(Command::SetSessionLabel {
+            .try_send(Command::SetSessionLabel {
                 session: args.session.clone(),
                 label: args.label.clone(),
                 color: args.color,
             })
-            .await
-            .map_err(|_| ErrorData::internal_error("overloaded", None))?;
+            .map_err(|e| match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    ErrorData::internal_error("lookout overloaded", None)
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    ErrorData::internal_error("state task closed", None)
+                }
+            })?;
         Ok(CallToolResult::success(vec![rmcp::model::Content::text(
             format!("ok:{}", args.session),
         )]))
