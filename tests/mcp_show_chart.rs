@@ -37,7 +37,7 @@ async fn show_chart_with_line_kind_pushes_a_card() -> anyhow::Result<()> {
     // ── Bind the MCP server on an ephemeral port ──────────────────────────────
     let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
         Arc::new(|| "integration-test-chart-line".to_string());
-    let server = McpServer::bind(0, cmd_tx, default_session).await?;
+    let server = McpServer::bind(0, cmd_tx, default_session, lookout::imagepaths::ImagePathAllowlist::new(vec![])).await?;
     let base_url = server.url();
 
     let client = reqwest::Client::new();
@@ -167,7 +167,7 @@ async fn show_chart_with_sparkline_values_pushes_a_card() -> anyhow::Result<()> 
     // ── Bind the MCP server on an ephemeral port ──────────────────────────────
     let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
         Arc::new(|| "integration-test-chart-sparkline".to_string());
-    let server = McpServer::bind(0, cmd_tx, default_session).await?;
+    let server = McpServer::bind(0, cmd_tx, default_session, lookout::imagepaths::ImagePathAllowlist::new(vec![])).await?;
     let base_url = server.url();
 
     let client = reqwest::Client::new();

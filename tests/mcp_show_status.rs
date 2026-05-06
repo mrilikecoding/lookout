@@ -37,7 +37,7 @@ async fn show_status_accepts_trend_and_style() -> anyhow::Result<()> {
     // ── Bind the MCP server on an ephemeral port ──────────────────────────────
     let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
         Arc::new(|| "integration-test-status".to_string());
-    let server = McpServer::bind(0, cmd_tx, default_session).await?;
+    let server = McpServer::bind(0, cmd_tx, default_session, lookout::imagepaths::ImagePathAllowlist::new(vec![])).await?;
     let base_url = server.url(); // e.g. "http://127.0.0.1:55123/mcp"
 
     let client = reqwest::Client::new();
@@ -176,7 +176,7 @@ async fn show_status_rejects_bad_trend() -> anyhow::Result<()> {
 
     let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
         Arc::new(|| "integration-test-status-err".to_string());
-    let server = McpServer::bind(0, cmd_tx, default_session).await?;
+    let server = McpServer::bind(0, cmd_tx, default_session, lookout::imagepaths::ImagePathAllowlist::new(vec![])).await?;
     let base_url = server.url();
     let client = reqwest::Client::new();
 

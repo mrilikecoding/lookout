@@ -16,8 +16,11 @@ use tokio::sync::mpsc;
 
 use chrono::DateTime;
 
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+
 use crate::{
-    card::{Card, CardId, CardKind, ChartKind, ChartSeries, CommonArgs, LogEntry, SessionId, StatusField, StatusStyle, TextFormat, TreeNode, Trend},
+    card::{Card, CardId, CardKind, ChartKind, ChartSeries, CommonArgs, ImageSource, LogEntry, SessionId, StatusField, StatusStyle, TextFormat, TreeNode, Trend},
+    imagepaths::ImagePathAllowlist,
     state::Command,
 };
 
@@ -237,6 +240,31 @@ pub struct ShowDiffArgs {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ShowImageArgs {
+    /// Filesystem path to the image (resolved against the allowlist).
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Base64-encoded image bytes (alternative to `path`).
+    #[serde(default)]
+    pub base64: Option<String>,
+    /// MIME type override (e.g. "image/png"). Auto-detected when omitted.
+    #[serde(default)]
+    pub mime: Option<String>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RawStatusField {
     /// Label for the field.
@@ -258,6 +286,7 @@ pub struct RawStatusField {
 pub struct LookoutServer {
     pub(crate) cmds: mpsc::Sender<Command>,
     pub(crate) default_session: Arc<dyn Fn() -> SessionId + Send + Sync>,
+    pub(crate) image_paths: ImagePathAllowlist,
     tool_router: ToolRouter<Self>,
 }
 
@@ -271,10 +300,12 @@ impl LookoutServer {
     pub fn new(
         cmds: mpsc::Sender<Command>,
         default_session: Arc<dyn Fn() -> SessionId + Send + Sync>,
+        image_paths: ImagePathAllowlist,
     ) -> Self {
         Self {
             cmds,
             default_session,
+            image_paths,
             tool_router: Self::tool_router(),
         }
     }
@@ -650,6 +681,59 @@ impl LookoutServer {
         };
         let card = self
             .push_card(common, kind)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Push an image card. Provide either `path` (resolved against allowlist) or `base64` (data inline). `mime` overrides auto-detection.
+    #[tool(description = "Push an image card. Provide either `path` (resolved against allowlist) or `base64` (data inline). `mime` overrides auto-detection.")]
+    pub async fn show_image(
+        &self,
+        Parameters(args): Parameters<ShowImageArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let (bytes, source) = match (args.path, args.base64) {
+            (Some(p), _) => {
+                let canon = self
+                    .image_paths
+                    .check(std::path::Path::new(&p))
+                    .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+                let bytes = std::fs::read(&canon)
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                (bytes, ImageSource::Path(canon))
+            }
+            (None, Some(b64)) => {
+                let bytes = B64
+                    .decode(b64.as_bytes())
+                    .map_err(|e| ErrorData::invalid_params(format!("base64: {e}"), None))?;
+                (bytes, ImageSource::Inline)
+            }
+            (None, None) => {
+                return Err(ErrorData::invalid_params(
+                    "must provide `path` or `base64`",
+                    None,
+                ));
+            }
+        };
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(
+                common,
+                CardKind::Image {
+                    bytes,
+                    mime: args.mime,
+                    source,
+                },
+            )
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 

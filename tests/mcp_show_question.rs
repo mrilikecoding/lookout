@@ -37,7 +37,7 @@ async fn show_question_pushes_a_card() -> anyhow::Result<()> {
     // ── Bind the MCP server on an ephemeral port ──────────────────────────────
     let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
         Arc::new(|| "integration-test-question".to_string());
-    let server = McpServer::bind(0, cmd_tx, default_session).await?;
+    let server = McpServer::bind(0, cmd_tx, default_session, lookout::imagepaths::ImagePathAllowlist::new(vec![])).await?;
     let base_url = server.url(); // e.g. "http://127.0.0.1:55123/mcp"
 
     let client = reqwest::Client::new();

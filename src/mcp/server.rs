@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     card::SessionId,
     error::Result,
+    imagepaths::ImagePathAllowlist,
     mcp::tools::LookoutServer,
     state::Command,
 };
@@ -27,6 +28,7 @@ impl McpServer {
         port: u16,
         cmds: mpsc::Sender<Command>,
         default_session: Arc<dyn Fn() -> SessionId + Send + Sync>,
+        image_paths: ImagePathAllowlist,
     ) -> Result<Self> {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
         let addr = listener.local_addr()?;
@@ -41,7 +43,7 @@ impl McpServer {
         let default_session2 = default_session.clone();
         let service: StreamableHttpService<LookoutServer, LocalSessionManager> =
             StreamableHttpService::new(
-                move || Ok(LookoutServer::new(cmds2.clone(), default_session2.clone())),
+                move || Ok(LookoutServer::new(cmds2.clone(), default_session2.clone(), image_paths.clone())),
                 Default::default(),
                 config,
             );
@@ -96,7 +98,7 @@ mod tests {
         tokio::spawn(state_task(AppState::new(8), cmd_rx, delta_tx));
         let session_fn: Arc<dyn Fn() -> SessionId + Send + Sync> =
             Arc::new(|| "test-session".to_string());
-        McpServer::bind(0, cmd_tx, session_fn).await.unwrap()
+        McpServer::bind(0, cmd_tx, session_fn, crate::imagepaths::ImagePathAllowlist::new(vec![])).await.unwrap()
     }
 
     #[tokio::test]

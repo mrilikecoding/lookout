@@ -37,7 +37,7 @@ async fn show_table_with_rows_pushes_a_card() -> anyhow::Result<()> {
     // ── Bind the MCP server on an ephemeral port ──────────────────────────────
     let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
         Arc::new(|| "integration-test-table-rows".to_string());
-    let server = McpServer::bind(0, cmd_tx, default_session).await?;
+    let server = McpServer::bind(0, cmd_tx, default_session, lookout::imagepaths::ImagePathAllowlist::new(vec![])).await?;
     let base_url = server.url();
 
     let client = reqwest::Client::new();
@@ -164,7 +164,7 @@ async fn show_table_with_csv_pushes_a_card() -> anyhow::Result<()> {
     // ── Bind the MCP server on an ephemeral port ──────────────────────────────
     let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
         Arc::new(|| "integration-test-table-csv".to_string());
-    let server = McpServer::bind(0, cmd_tx, default_session).await?;
+    let server = McpServer::bind(0, cmd_tx, default_session, lookout::imagepaths::ImagePathAllowlist::new(vec![])).await?;
     let base_url = server.url();
 
     let client = reqwest::Client::new();
