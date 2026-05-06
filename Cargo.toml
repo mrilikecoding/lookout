@@ -8,7 +8,7 @@ description = "Streaming visualizer with MCP interface"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["rt"] }
 futures = "0.3"
 async-trait = "0.1"
 
@@ -20,6 +20,9 @@ tui-tree-widget = "0.23"
 
 # MCP
 rmcp = { version = "1", features = ["server", "transport-streamable-http-server", "macros"] }
+
+# HTTP server (required by rmcp's streamable-HTTP transport)
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 
 # Serde / schema
 serde = { version = "1", features = ["derive"] }
@@ -59,3 +62,4 @@ image = "0.25"
 insta = { version = "1", features = ["yaml", "json"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

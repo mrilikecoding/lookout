@@ -1,17 +1,136 @@
-//! MCP tool handlers. Populated incrementally in later tasks.
+//! MCP tool handlers.  LookoutServer is the single rmcp `ServerHandler` impl;
+//! all `show_*` tools funnel through `push_card`.
 
-use crate::state::Command;
+use std::sync::Arc;
+
+use rmcp::{
+    ErrorData,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::CallToolResult,
+    schemars, tool, tool_handler, tool_router,
+};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-/// Handle to the state task — every tool sends Commands through this.
-#[derive(Clone)]
-pub struct ToolCtx {
-    pub cmds: mpsc::Sender<Command>,
-    pub default_session_for: std::sync::Arc<dyn Fn() -> String + Send + Sync>,
+use crate::{
+    card::{Card, CardId, CardKind, CommonArgs, SessionId, TextFormat},
+    state::Command,
+};
+
+// ── Args ─────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ShowTextArgs {
+    /// The text content to display.
+    pub content: String,
+    /// Rendering hint: "plain", "markdown", or "code". Defaults to "plain".
+    pub format: Option<String>,
+    /// Programming language for code blocks (only meaningful when format = "code").
+    pub language: Option<String>,
+    /// Optional card title.
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    pub note: Option<String>,
 }
 
-impl std::fmt::Debug for ToolCtx {
+// ── LookoutServer ─────────────────────────────────────────────────────────────
+
+/// The rmcp `ServerHandler` that dispatches MCP tool calls into the state task.
+#[derive(Clone)]
+pub struct LookoutServer {
+    pub(crate) cmds: mpsc::Sender<Command>,
+    pub(crate) default_session: Arc<dyn Fn() -> SessionId + Send + Sync>,
+    tool_router: ToolRouter<Self>,
+}
+
+impl std::fmt::Debug for LookoutServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ToolCtx").finish()
+        f.debug_struct("LookoutServer").finish_non_exhaustive()
     }
 }
+
+impl LookoutServer {
+    pub fn new(
+        cmds: mpsc::Sender<Command>,
+        default_session: Arc<dyn Fn() -> SessionId + Send + Sync>,
+    ) -> Self {
+        Self {
+            cmds,
+            default_session,
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    /// Build a card, send it to the state task, and return it.
+    pub(crate) async fn push_card(
+        &self,
+        common: CommonArgs,
+        kind: CardKind,
+    ) -> std::result::Result<Card, crate::error::Error> {
+        let card = Card::build(common, (self.default_session)(), kind);
+        self.cmds
+            .send(Command::PushCard(card.clone()))
+            .await
+            .map_err(|_| crate::error::Error::Internal("state task has shut down".into()))?;
+        Ok(card)
+    }
+}
+
+// ── Tool implementations ──────────────────────────────────────────────────────
+
+#[tool_router]
+impl LookoutServer {
+    /// Display a block of text in the lookout feed.
+    #[tool(description = "Display text content in the lookout feed.")]
+    async fn show_text(
+        &self,
+        Parameters(args): Parameters<ShowTextArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let format = match args.format.as_deref().unwrap_or("plain") {
+            "plain" => TextFormat::Plain,
+            "markdown" => TextFormat::Markdown,
+            "code" => TextFormat::Code,
+            other => {
+                return Err(ErrorData::invalid_params(
+                    format!(
+                        "unknown format {:?}: expected \"plain\", \"markdown\", or \"code\"",
+                        other
+                    ),
+                    None,
+                ));
+            }
+        };
+
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let kind = CardKind::Text {
+            content: args.content,
+            format,
+            language: args.language,
+        };
+
+        let card = self
+            .push_card(common, kind)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+}
+
+// ── ServerHandler wiring ──────────────────────────────────────────────────────
+
+#[tool_handler(router = self.tool_router)]
+impl rmcp::ServerHandler for LookoutServer {}
