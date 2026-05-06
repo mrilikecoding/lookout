@@ -104,6 +104,9 @@ impl TuiApp {
             if !snap.feed.is_empty() {
                 self.feed_focused_idx = self.feed_focused_idx.min(snap.feed.len() - 1);
             }
+            if !snap.pins.is_empty() {
+                self.pin_focused_idx = self.pin_focused_idx.min(snap.pins.len() - 1);
+            }
 
             // Render.
             terminal.draw(|f| {
@@ -159,6 +162,12 @@ impl TuiApp {
                     } else {
                         match code {
                             KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Tab => {
+                                self.focus = match self.focus {
+                                    FocusRegion::Pins => FocusRegion::Feed,
+                                    FocusRegion::Feed => FocusRegion::Pins,
+                                };
+                            }
                             KeyCode::Char(c @ '1'..='9') => {
                                 let idx = (c as u8 - b'1') as usize;
                                 let snap = self.snapshot.lock().unwrap();
@@ -177,17 +186,32 @@ impl TuiApp {
                                     }
                                 }
                             }
-                            KeyCode::Char('j') | KeyCode::Down => {
-                                let len = self.snapshot.lock().unwrap().feed.len();
-                                if self.feed_focused_idx + 1 < len {
-                                    self.feed_focused_idx += 1;
+                            KeyCode::Char('j') | KeyCode::Down => match self.focus {
+                                FocusRegion::Pins => {
+                                    let len = self.snapshot.lock().unwrap().pins.len();
+                                    if self.pin_focused_idx + 1 < len {
+                                        self.pin_focused_idx += 1;
+                                    }
                                 }
-                            }
-                            KeyCode::Char('k') | KeyCode::Up => {
-                                if self.feed_focused_idx > 0 {
-                                    self.feed_focused_idx -= 1;
+                                FocusRegion::Feed => {
+                                    let len = self.snapshot.lock().unwrap().feed.len();
+                                    if self.feed_focused_idx + 1 < len {
+                                        self.feed_focused_idx += 1;
+                                    }
                                 }
-                            }
+                            },
+                            KeyCode::Char('k') | KeyCode::Up => match self.focus {
+                                FocusRegion::Pins => {
+                                    if self.pin_focused_idx > 0 {
+                                        self.pin_focused_idx -= 1;
+                                    }
+                                }
+                                FocusRegion::Feed => {
+                                    if self.feed_focused_idx > 0 {
+                                        self.feed_focused_idx -= 1;
+                                    }
+                                }
+                            },
                             KeyCode::Char('o') | KeyCode::Enter => {
                                 let snap = self.snapshot.lock().unwrap();
                                 if !snap.feed.is_empty() {
