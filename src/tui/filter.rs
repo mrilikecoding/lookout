@@ -50,7 +50,25 @@ impl FilterState {
     }
 }
 
-pub fn render(f: &mut Frame, area: Rect, all_sessions: &[String], state: &FilterState) {
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    all_sessions: &[String],
+    state: &FilterState,
+    prompt: Option<&str>,
+) {
+    // When in filter-prompt mode, show the typed query with a cursor instead of chips.
+    if let Some(s) = prompt {
+        let bar = Paragraph::new(Line::from(vec![
+            Span::raw("Filter: /"),
+            Span::styled(s.to_string(), Style::default().fg(Color::Yellow)),
+            Span::styled("_", Style::default().add_modifier(Modifier::RAPID_BLINK)),
+            Span::raw("    Enter confirm  Esc cancel"),
+        ]));
+        f.render_widget(bar, area);
+        return;
+    }
+
     let mut spans = vec![Span::raw("Filter: ")];
     let all = state.sessions.is_empty();
     spans.push(Span::styled(

@@ -30,24 +30,30 @@ pub struct TuiApp {
     /// Closure that produces a fresh snapshot from the live AppState.
     /// (We pass a closure to keep the AppState ownership in the state task.)
     refresh: Arc<dyn Fn() -> UiSnapshot + Send + Sync>,
+    cmd_tx: tokio::sync::mpsc::Sender<crate::state::Command>,
     focused_idx: usize,
     expanded: Option<crate::card::CardId>,
     filter: crate::tui::filter::FilterState,
+    /// When `Some`, we're in filter prompt mode and the buffer holds the typed query.
+    filter_prompt: Option<String>,
 }
 
 impl TuiApp {
     pub fn new(
         deltas: broadcast::Receiver<StateDelta>,
         refresh: Arc<dyn Fn() -> UiSnapshot + Send + Sync>,
+        cmd_tx: tokio::sync::mpsc::Sender<crate::state::Command>,
     ) -> Self {
         let initial = refresh();
         Self {
             snapshot: Arc::new(Mutex::new(initial)),
             deltas,
             refresh,
+            cmd_tx,
             focused_idx: 0,
             expanded: None,
             filter: crate::tui::filter::FilterState::default(),
+            filter_prompt: None,
         }
     }
 
@@ -85,7 +91,9 @@ impl TuiApp {
             }
 
             // Render.
-            terminal.draw(|f| draw(f, &snap, self.focused_idx, self.expanded, &self.filter))?;
+            terminal.draw(|f| {
+                draw(f, &snap, self.focused_idx, self.expanded, &self.filter, self.filter_prompt.as_deref())
+            })?;
 
             // Poll for keyboard or sleep until next tick.
             if event::poll(tick)? {
@@ -95,39 +103,101 @@ impl TuiApp {
                     ..
                 }) = event::read()?
                 {
-                    match code {
-                        KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Char('j') | KeyCode::Down => {
-                            let len = self.snapshot.lock().unwrap().feed.len();
-                            if self.focused_idx + 1 < len {
-                                self.focused_idx += 1;
+                    // Filter-prompt mode: route keys to the input buffer.
+                    if let Some(buf) = self.filter_prompt.as_mut() {
+                        match code {
+                            KeyCode::Esc => {
+                                self.filter_prompt = None;
                             }
-                        }
-                        KeyCode::Char('k') | KeyCode::Up => {
-                            if self.focused_idx > 0 {
-                                self.focused_idx -= 1;
+                            KeyCode::Enter => {
+                                let query = std::mem::take(buf).trim().to_string();
+                                self.filter.query =
+                                    if query.is_empty() { None } else { Some(query) };
+                                self.filter_prompt = None;
                             }
+                            KeyCode::Backspace => {
+                                buf.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                buf.push(c);
+                            }
+                            _ => {}
                         }
-                        KeyCode::Char('o') | KeyCode::Enter => {
-                            let snap = self.snapshot.lock().unwrap();
-                            if !snap.feed.is_empty() {
-                                // Newest at top: card at displayed index `i` is feed[len - 1 - i].
-                                let len = snap.feed.len();
-                                let idx = self.focused_idx.min(len - 1);
-                                let card_idx = len - 1 - idx;
-                                let id = snap.feed[card_idx].id;
-                                drop(snap);
-                                if self.expanded == Some(id) {
-                                    self.expanded = None;
-                                } else {
-                                    self.expanded = Some(id);
+                        // Prompt consumed the key; skip normal bindings.
+                    } else {
+                        match code {
+                            KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char('j') | KeyCode::Down => {
+                                let len = self.snapshot.lock().unwrap().feed.len();
+                                if self.focused_idx + 1 < len {
+                                    self.focused_idx += 1;
                                 }
                             }
+                            KeyCode::Char('k') | KeyCode::Up => {
+                                if self.focused_idx > 0 {
+                                    self.focused_idx -= 1;
+                                }
+                            }
+                            KeyCode::Char('o') | KeyCode::Enter => {
+                                let snap = self.snapshot.lock().unwrap();
+                                if !snap.feed.is_empty() {
+                                    // Newest at top: card at displayed index `i` is feed[len - 1 - i].
+                                    let len = snap.feed.len();
+                                    let idx = self.focused_idx.min(len - 1);
+                                    let card_idx = len - 1 - idx;
+                                    let id = snap.feed[card_idx].id;
+                                    drop(snap);
+                                    if self.expanded == Some(id) {
+                                        self.expanded = None;
+                                    } else {
+                                        self.expanded = Some(id);
+                                    }
+                                }
+                            }
+                            KeyCode::Esc => {
+                                self.expanded = None;
+                            }
+                            KeyCode::Char('p') => {
+                                // Pin focused card to a slot named "pinned:<short_id>".
+                                let snap = self.snapshot.lock().unwrap();
+                                if !snap.feed.is_empty() {
+                                    let len = snap.feed.len();
+                                    let idx = self.focused_idx.min(len - 1);
+                                    let card_idx = len - 1 - idx;
+                                    let mut card = snap.feed[card_idx].clone();
+                                    drop(snap);
+                                    let short = card.id.0.to_string()[..8].to_string();
+                                    card.pin_slot = Some(format!("pinned:{short}"));
+                                    let _ = self
+                                        .cmd_tx
+                                        .try_send(crate::state::Command::PushCard(card));
+                                }
+                            }
+                            KeyCode::Char('P') => {
+                                // Unpin focused card's slot if it's pinned.
+                                let snap = self.snapshot.lock().unwrap();
+                                if !snap.feed.is_empty() {
+                                    let len = snap.feed.len();
+                                    let idx = self.focused_idx.min(len - 1);
+                                    let card_idx = len - 1 - idx;
+                                    if let Some(slot) = snap.feed[card_idx].pin_slot.clone() {
+                                        drop(snap);
+                                        let _ = self
+                                            .cmd_tx
+                                            .try_send(crate::state::Command::Unpin { slot });
+                                    }
+                                }
+                            }
+                            KeyCode::Char('c') => {
+                                let _ = self
+                                    .cmd_tx
+                                    .try_send(crate::state::Command::ClearFeed);
+                            }
+                            KeyCode::Char('/') => {
+                                self.filter_prompt = Some(String::new());
+                            }
+                            _ => {}
                         }
-                        KeyCode::Esc => {
-                            self.expanded = None;
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -135,7 +205,7 @@ impl TuiApp {
     }
 }
 
-fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded: Option<crate::card::CardId>, filter: &crate::tui::filter::FilterState) {
+fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded: Option<crate::card::CardId>, filter: &crate::tui::filter::FilterState, prompt: Option<&str>) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -153,7 +223,7 @@ fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded:
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    crate::tui::filter::render(f, chunks[1], &all_sessions, filter);
+    crate::tui::filter::render(f, chunks[1], &all_sessions, filter, prompt);
 
     // Split body into feed (70%) and pin sidebar (30%).
     let body = Layout::default()

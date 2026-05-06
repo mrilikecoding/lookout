@@ -42,6 +42,7 @@ async fn main() -> Result<()> {
     // The server spawns its own background task internally.
     let default_session: Arc<dyn Fn() -> String + Send + Sync> =
         Arc::new(|| "default-session".to_string());
+    let cmd_tx_for_tui = cmd_tx.clone();
     let server = McpServer::bind(
         port,
         cmd_tx,
@@ -63,7 +64,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    let app = TuiApp::new(delta_rx, refresh);
+    let app = TuiApp::new(delta_rx, refresh, cmd_tx_for_tui);
     app.run().await?;
 
     // TUI exited (q or Ctrl-C). Drop everything; tokio cleans up.
