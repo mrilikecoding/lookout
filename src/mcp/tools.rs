@@ -24,6 +24,72 @@ use crate::{
     state::Command,
 };
 
+// ── Deserializers ────────────────────────────────────────────────────────────
+
+/// Accept either a JSON number or a numeric string (some MCP clients
+/// stringify scalars). Used by tools whose JSON Schema declares `number`
+/// fields but in practice may receive `"0"` from typed-XML-parameter clients.
+fn deserialize_lenient_f64<'de, D>(d: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = serde_json::Value::deserialize(d)?;
+    coerce_f64(&v).ok_or_else(|| Error::custom(format!("expected number, got {v}")))
+}
+
+fn deserialize_lenient_opt_f64<'de, D>(d: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    match v {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(val) => coerce_f64(&val)
+            .map(Some)
+            .ok_or_else(|| Error::custom(format!("expected number or null, got {val}"))),
+    }
+}
+
+fn coerce_f64(v: &serde_json::Value) -> Option<f64> {
+    match v {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod coerce_tests {
+    use super::*;
+
+    #[test]
+    fn coerces_json_number() {
+        assert_eq!(coerce_f64(&serde_json::json!(0.5)), Some(0.5));
+        assert_eq!(coerce_f64(&serde_json::json!(0)), Some(0.0));
+    }
+
+    #[test]
+    fn coerces_numeric_string() {
+        assert_eq!(coerce_f64(&serde_json::json!("0")), Some(0.0));
+        assert_eq!(coerce_f64(&serde_json::json!("3.14")), Some(3.14));
+        assert_eq!(coerce_f64(&serde_json::json!("-2")), Some(-2.0));
+    }
+
+    #[test]
+    fn rejects_non_numeric_string() {
+        assert_eq!(coerce_f64(&serde_json::json!("abc")), None);
+    }
+
+    #[test]
+    fn rejects_other_json_kinds() {
+        assert_eq!(coerce_f64(&serde_json::json!(null)), None);
+        assert_eq!(coerce_f64(&serde_json::json!(true)), None);
+        assert_eq!(coerce_f64(&serde_json::json!([1])), None);
+    }
+}
+
 // ── Args ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -272,9 +338,10 @@ pub struct ShowProgressArgs {
     /// Short label describing what is being tracked.
     pub label: String,
     /// Current progress value (arbitrary numeric units).
+    #[serde(deserialize_with = "deserialize_lenient_f64")]
     pub current: f64,
     /// Optional total value; if unset, progress is interpreted as an absolute quantity.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_lenient_opt_f64")]
     pub total: Option<f64>,
     /// Optional status text (e.g., "uploading", "complete").
     #[serde(default)]
