@@ -10,7 +10,6 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::widgets::{Block, Borders};
 use ratatui::Terminal;
 use std::io::Stdout;
 use std::sync::{Arc, Mutex};
@@ -31,6 +30,7 @@ pub struct TuiApp {
     /// Closure that produces a fresh snapshot from the live AppState.
     /// (We pass a closure to keep the AppState ownership in the state task.)
     refresh: Arc<dyn Fn() -> UiSnapshot + Send + Sync>,
+    focused_idx: usize,
 }
 
 impl TuiApp {
@@ -43,6 +43,7 @@ impl TuiApp {
             snapshot: Arc::new(Mutex::new(initial)),
             deltas,
             refresh,
+            focused_idx: 0,
         }
     }
 
@@ -73,9 +74,14 @@ impl TuiApp {
                 *self.snapshot.lock().unwrap() = fresh;
             }
 
-            // Render.
+            // Clamp focused_idx to valid range after any refresh.
             let snap = self.snapshot.lock().unwrap().clone();
-            terminal.draw(|f| draw(f, &snap))?;
+            if !snap.feed.is_empty() {
+                self.focused_idx = self.focused_idx.min(snap.feed.len() - 1);
+            }
+
+            // Render.
+            terminal.draw(|f| draw(f, &snap, self.focused_idx))?;
 
             // Poll for keyboard or sleep until next tick.
             if event::poll(tick)? {
@@ -85,8 +91,20 @@ impl TuiApp {
                     ..
                 }) = event::read()?
                 {
-                    if matches!(code, KeyCode::Char('q')) {
-                        return Ok(());
+                    match code {
+                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            let len = self.snapshot.lock().unwrap().feed.len();
+                            if self.focused_idx + 1 < len {
+                                self.focused_idx += 1;
+                            }
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            if self.focused_idx > 0 {
+                                self.focused_idx -= 1;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -94,12 +112,31 @@ impl TuiApp {
     }
 }
 
-fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot) {
+fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(1)])
         .split(f.area());
     crate::tui::header::render(f, chunks[0], snap);
-    let body = Block::default().borders(Borders::ALL).title("feed");
-    f.render_widget(body, chunks[1]);
+
+    // Split body into feed (70%) and pin sidebar (30%).
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .split(chunks[1]);
+
+    crate::tui::feed::render(
+        f,
+        body[0],
+        crate::tui::feed::FeedView {
+            cards: &snap.feed,
+            focused: focused_idx,
+        },
+    );
+
+    // Pin sidebar placeholder (Task 30 fills this in).
+    let pin_block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .title("Pinned");
+    f.render_widget(pin_block, body[1]);
 }
