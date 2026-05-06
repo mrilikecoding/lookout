@@ -305,6 +305,15 @@ impl TuiApp {
                             KeyCode::Char('/') => {
                                 self.filter_prompt = Some(String::new());
                             }
+                            KeyCode::Char('g') => {
+                                self.feed_compact = !self.feed_compact;
+                            }
+                            KeyCode::Char('G') => {
+                                self.focus = FocusRegion::Feed;
+                                if self.feed_compact {
+                                    self.feed_compact = false;
+                                }
+                            }
                             _ => {}
                         }
                     }
