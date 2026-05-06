@@ -296,5 +296,13 @@ fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded:
         );
     }
 
-    crate::tui::pins::render(f, body[1], &snap.pins);
+    crate::tui::pins::render(
+        f,
+        body[1],
+        crate::tui::pins::PinView {
+            pins: &snap.pins,
+            focused: None,
+            zoomed: None,
+        },
+    );
 }
