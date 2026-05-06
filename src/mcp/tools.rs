@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use chrono::DateTime;
 
 use crate::{
-    card::{Card, CardId, CardKind, ChartKind, ChartSeries, CommonArgs, LogEntry, SessionId, StatusField, StatusStyle, TextFormat, Trend},
+    card::{Card, CardId, CardKind, ChartKind, ChartSeries, CommonArgs, LogEntry, SessionId, StatusField, StatusStyle, TextFormat, TreeNode, Trend},
     state::Command,
 };
 
@@ -183,6 +183,37 @@ pub struct RawChartSeries {
     pub values: Option<Vec<f64>>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ShowTreeArgs {
+    /// Any JSON value, auto-rendered as a tree structure.
+    #[serde(default)]
+    pub data: Option<JsonValue>,
+    /// Explicit hierarchical labels (alternative to `data`).
+    #[serde(default)]
+    pub nodes: Option<Vec<RawTreeNode>>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RawTreeNode {
+    /// Label for this node.
+    pub label: String,
+    /// Child nodes.
+    #[serde(default)]
+    pub children: Vec<RawTreeNode>,
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RawStatusField {
     /// Label for the field.
@@ -237,6 +268,36 @@ impl LookoutServer {
             .await
             .map_err(|_| crate::error::Error::Internal("state task has shut down".into()))?;
         Ok(card)
+    }
+}
+
+// ── Tree helpers ──────────────────────────────────────────────────────
+
+fn raw_to_node(r: RawTreeNode) -> TreeNode {
+    TreeNode {
+        label: r.label,
+        children: r.children.into_iter().map(raw_to_node).collect(),
+    }
+}
+
+fn json_to_node(label: &str, v: &JsonValue) -> TreeNode {
+    match v {
+        JsonValue::Object(map) => TreeNode {
+            label: format!("{label} {{…}}"),
+            children: map.iter().map(|(k, vv)| json_to_node(k, vv)).collect(),
+        },
+        JsonValue::Array(items) => TreeNode {
+            label: format!("{label} [{}]", items.len()),
+            children: items
+                .iter()
+                .enumerate()
+                .map(|(i, vv)| json_to_node(&i.to_string(), vv))
+                .collect(),
+        },
+        leaf => TreeNode {
+            label: format!("{label}: {leaf}"),
+            children: Vec::new(),
+        },
     }
 }
 
@@ -502,6 +563,42 @@ impl LookoutServer {
                     y_label: args.y_label,
                 },
             )
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Push a tree card. Provide `data` (any JSON, auto-rendered as a tree) or `nodes` (explicit hierarchical labels).
+    #[tool(description = "Push a tree card. Provide `data` (any JSON, auto-rendered as a tree) or `nodes` (explicit hierarchical labels).")]
+    pub async fn show_tree(
+        &self,
+        Parameters(args): Parameters<ShowTreeArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let root = match (args.data, args.nodes) {
+            (Some(v), _) => json_to_node("$", &v),
+            (None, Some(nodes)) => TreeNode {
+                label: "root".into(),
+                children: nodes.into_iter().map(raw_to_node).collect(),
+            },
+            (None, None) => {
+                return Err(ErrorData::invalid_params(
+                    "must provide `data` or `nodes`",
+                    None,
+                ))
+            }
+        };
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(common, CardKind::Tree { root })
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
