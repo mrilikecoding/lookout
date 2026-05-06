@@ -1,25 +1,44 @@
+use clap::Parser;
+use lookout::card::SessionId;
 use lookout::error::Result;
 use lookout::imagepaths::ImagePathAllowlist;
+use lookout::logging;
 use lookout::mcp::server::McpServer;
 use lookout::state::{AppState, Command, StateDelta};
 use lookout::tui::app::{TuiApp, UiSnapshot};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
+
+#[derive(Parser, Debug)]
+#[command(version, about = "Streaming visualizer with MCP interface")]
+struct Args {
+    #[arg(long, default_value_t = 9477)]
+    port: u16,
+    #[arg(long, default_value_t = 1000)]
+    max_cards: usize,
+    /// Comma-separated paths allowed for `show_image(path=...)`. Defaults to $HOME and $TMPDIR.
+    #[arg(long, value_delimiter = ',')]
+    image_paths: Vec<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    debug: bool,
+}
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
-    let port: u16 = 9477;
-    let feed_max = 1000;
+    let args = Args::parse();
+    let _guard = logging::init(args.debug)?;
+    tracing::info!(port = args.port, max_cards = args.max_cards, "lookout starting");
 
-    let state = Arc::new(Mutex::new(AppState::new(feed_max)));
+    let state = Arc::new(Mutex::new(AppState::new(args.max_cards)));
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(1024);
     let (delta_tx, delta_rx) = broadcast::channel::<StateDelta>(256);
 
-    // State loop: drain commands, apply to shared AppState, broadcast deltas.
     let state_for_loop = state.clone();
     let delta_tx_for_loop = delta_tx.clone();
-    tokio::spawn(async move {
+    let state_loop = tokio::spawn(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             let deltas: Vec<StateDelta> = {
                 let mut s = state_for_loop.lock().unwrap();
@@ -38,20 +57,21 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Bind MCP server. McpServer::bind takes a port (u16), not a SocketAddr.
-    // The server spawns its own background task internally.
-    let default_session: Arc<dyn Fn() -> String + Send + Sync> =
-        Arc::new(|| "default-session".to_string());
-    let cmd_tx_for_tui = cmd_tx.clone();
+    let allowlist = if args.image_paths.is_empty() {
+        ImagePathAllowlist::default_roots()
+    } else {
+        ImagePathAllowlist::new(args.image_paths)
+    };
+
     let server = McpServer::bind(
-        port,
-        cmd_tx,
-        default_session,
-        ImagePathAllowlist::default_roots(),
+        args.port,
+        cmd_tx.clone(),
+        Arc::new(|| SessionId::from("default-session")),
+        allowlist,
     )
     .await?;
-
     let url = server.url();
+    tracing::info!(url = %url, "mcp server bound");
 
     let state_for_refresh = state.clone();
     let url_for_refresh = url.clone();
@@ -64,10 +84,15 @@ async fn main() -> Result<()> {
         }
     });
 
-    let app = TuiApp::new(delta_rx, refresh, cmd_tx_for_tui);
-    app.run().await?;
+    let app = TuiApp::new(delta_rx, refresh, cmd_tx.clone());
+    let tui_result = app.run().await;
 
-    // TUI exited (q or Ctrl-C). Drop everything; tokio cleans up.
+    // Graceful drain: stop accepting new MCP traffic, then give the state loop
+    // up to 2 seconds to drain in-flight commands.
+    tracing::info!("lookout shutting down");
     server.shutdown();
-    Ok(())
+    drop(cmd_tx);
+    let _ = tokio::time::timeout(Duration::from_secs(2), state_loop).await;
+
+    tui_result
 }
