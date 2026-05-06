@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use chrono::DateTime;
 
 use crate::{
-    card::{Card, CardId, CardKind, CommonArgs, LogEntry, SessionId, StatusField, StatusStyle, TextFormat, Trend},
+    card::{Card, CardId, CardKind, ChartKind, ChartSeries, CommonArgs, LogEntry, SessionId, StatusField, StatusStyle, TextFormat, Trend},
     state::Command,
 };
 
@@ -143,6 +143,44 @@ pub struct ShowTableArgs {
     /// Freeform note attached to the card.
     #[serde(default)]
     pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ShowChartArgs {
+    /// Chart kind: "line", "bar", "scatter", "sparkline", or "hist".
+    pub kind: String,
+    /// Series data.
+    pub series: Vec<RawChartSeries>,
+    /// X-axis label.
+    #[serde(default)]
+    pub x_label: Option<String>,
+    /// Y-axis label.
+    #[serde(default)]
+    pub y_label: Option<String>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RawChartSeries {
+    /// Series name.
+    pub name: String,
+    /// Either [[x,y], ...] points or a flat values array (x = index).
+    #[serde(default)]
+    pub points: Option<Vec<(f64, f64)>>,
+    /// Flat values array; x-axis is the index.
+    #[serde(default)]
+    pub values: Option<Vec<f64>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -404,6 +442,66 @@ impl LookoutServer {
         };
         let card = self
             .push_card(common, CardKind::Table { columns, rows })
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Push a chart card. `kind` is one of line|bar|scatter|sparkline|hist. Each series provides points or a flat values array.
+    #[tool(description = "Push a chart card. `kind` is one of line|bar|scatter|sparkline|hist. Each series provides points or a flat values array.")]
+    pub async fn show_chart(
+        &self,
+        Parameters(args): Parameters<ShowChartArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let kind = match args.kind.as_str() {
+            "line" => ChartKind::Line,
+            "bar" => ChartKind::Bar,
+            "scatter" => ChartKind::Scatter,
+            "sparkline" => ChartKind::Sparkline,
+            "hist" => ChartKind::Hist,
+            other => {
+                return Err(ErrorData::invalid_params(
+                    format!("unknown chart kind '{other}'"),
+                    None,
+                ));
+            }
+        };
+        let series: Vec<ChartSeries> = args
+            .series
+            .into_iter()
+            .map(|s| {
+                let points = match (s.points, s.values) {
+                    (Some(p), _) => p,
+                    (None, Some(v)) => v
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, y)| (i as f64, y))
+                        .collect(),
+                    (None, None) => Vec::new(),
+                };
+                ChartSeries { name: s.name, points }
+            })
+            .collect();
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(
+                common,
+                CardKind::Chart {
+                    kind,
+                    series,
+                    x_label: args.x_label,
+                    y_label: args.y_label,
+                },
+            )
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
