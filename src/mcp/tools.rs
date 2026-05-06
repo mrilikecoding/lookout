@@ -96,6 +96,30 @@ pub struct ShowStatusArgs {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ShowQuestionArgs {
+    /// The question to ask.
+    pub question: String,
+    /// Multiple-choice options.
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// Optional context or explanation.
+    #[serde(default)]
+    pub context: Option<String>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RawStatusField {
     /// Label for the field.
     pub label: String,
@@ -292,6 +316,34 @@ impl LookoutServer {
         };
         let card = self
             .push_card(common, CardKind::Status { fields })
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Push a question card — used when the agent wants to surface a decision point. Read-only here; the answer happens in the originating session.
+    #[tool(description = "Push a question card — used when the agent wants to surface a decision point. Read-only here; the answer happens in the originating session.")]
+    pub async fn show_question(
+        &self,
+        Parameters(args): Parameters<ShowQuestionArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let kind = CardKind::Question {
+            question: args.question,
+            options: args.options,
+            context: args.context,
+        };
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(common, kind)
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
