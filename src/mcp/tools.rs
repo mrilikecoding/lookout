@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 use chrono::DateTime;
 
 use crate::{
-    card::{Card, CardId, CardKind, CommonArgs, LogEntry, SessionId, TextFormat},
+    card::{Card, CardId, CardKind, CommonArgs, LogEntry, SessionId, StatusField, StatusStyle, TextFormat, Trend},
     state::Command,
 };
 
@@ -75,6 +75,38 @@ pub struct RawLogEntry {
     pub source: Option<String>,
     /// Log message.
     pub msg: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ShowStatusArgs {
+    /// Key-value fields to display.
+    pub fields: Vec<RawStatusField>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RawStatusField {
+    /// Label for the field.
+    pub label: String,
+    /// Value to display.
+    pub value: String,
+    /// Trend indicator: "up", "down", or "flat".
+    #[serde(default)]
+    pub trend: Option<String>,
+    /// Style hint: "good", "warn", or "bad".
+    #[serde(default)]
+    pub style: Option<String>,
 }
 
 // ── LookoutServer ─────────────────────────────────────────────────────────────
@@ -208,6 +240,58 @@ impl LookoutServer {
         };
         let card = self
             .push_card(common, CardKind::Log { entries })
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Push a status card: a compact key-value grid with optional trend arrows and severity styles.
+    #[tool(description = "Push a status card: a compact key-value grid with optional trend arrows and severity styles.")]
+    async fn show_status(
+        &self,
+        Parameters(args): Parameters<ShowStatusArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        fn parse_trend(s: Option<String>) -> std::result::Result<Option<Trend>, String> {
+            match s.as_deref() {
+                None => Ok(None),
+                Some("up") => Ok(Some(Trend::Up)),
+                Some("down") => Ok(Some(Trend::Down)),
+                Some("flat") => Ok(Some(Trend::Flat)),
+                Some(other) => Err(format!("unknown trend '{other}'")),
+            }
+        }
+        fn parse_style(s: Option<String>) -> std::result::Result<Option<StatusStyle>, String> {
+            match s.as_deref() {
+                None => Ok(None),
+                Some("good") => Ok(Some(StatusStyle::Good)),
+                Some("warn") => Ok(Some(StatusStyle::Warn)),
+                Some("bad") => Ok(Some(StatusStyle::Bad)),
+                Some(other) => Err(format!("unknown style '{other}'")),
+            }
+        }
+        let mut fields = Vec::with_capacity(args.fields.len());
+        for f in args.fields {
+            let trend = parse_trend(f.trend).map_err(|m| ErrorData::invalid_params(m, None))?;
+            let style = parse_style(f.style).map_err(|m| ErrorData::invalid_params(m, None))?;
+            fields.push(StatusField {
+                label: f.label,
+                value: f.value,
+                trend,
+                style,
+            });
+        }
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(common, CardKind::Status { fields })
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
