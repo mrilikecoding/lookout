@@ -13,8 +13,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
+use chrono::DateTime;
+
 use crate::{
-    card::{Card, CardId, CardKind, CommonArgs, SessionId, TextFormat},
+    card::{Card, CardId, CardKind, CommonArgs, LogEntry, SessionId, TextFormat},
     state::Command,
 };
 
@@ -36,6 +38,43 @@ pub struct ShowTextArgs {
     pub pin: Option<String>,
     /// Freeform note attached to the card.
     pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ShowLogArgs {
+    /// Pre-structured log entries.
+    #[serde(default)]
+    pub entries: Option<Vec<RawLogEntry>>,
+    /// Freeform text blob: split into one entry per line.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Optional card title.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Session ID to target; defaults to the connection session.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Pin-slot name to anchor this card.
+    #[serde(default)]
+    pub pin: Option<String>,
+    /// Freeform note attached to the card.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RawLogEntry {
+    /// ISO 8601 timestamp.
+    #[serde(default)]
+    pub ts: Option<String>,
+    /// Log level (e.g., "info", "warn", "error").
+    #[serde(default)]
+    pub level: Option<String>,
+    /// Source identifier.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Log message.
+    pub msg: String,
 }
 
 // ── LookoutServer ─────────────────────────────────────────────────────────────
@@ -120,6 +159,55 @@ impl LookoutServer {
 
         let card = self
             .push_card(common, kind)
+            .await
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        let CardId(uuid) = card.id;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Push a log card. Pass either `entries` (structured) or `text` (one entry per line).
+    #[tool(description = "Push a log card. Pass either `entries` (structured) or `text` (one entry per line).")]
+    async fn show_log(
+        &self,
+        Parameters(args): Parameters<ShowLogArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let entries: Vec<LogEntry> = match (args.entries, args.text) {
+            (Some(es), _) => es
+                .into_iter()
+                .map(|e| LogEntry {
+                    ts: e.ts.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|d| d.to_utc())),
+                    level: e.level,
+                    source: e.source,
+                    msg: e.msg,
+                })
+                .collect(),
+            (None, Some(text)) => text
+                .lines()
+                .map(|l| LogEntry {
+                    ts: None,
+                    level: None,
+                    source: None,
+                    msg: l.to_string(),
+                })
+                .collect(),
+            (None, None) => {
+                return Err(ErrorData::invalid_params(
+                    "must provide `entries` or `text`",
+                    None,
+                ));
+            }
+        };
+        let common = CommonArgs {
+            title: args.title,
+            session: args.session,
+            pin: args.pin,
+            note: args.note,
+        };
+        let card = self
+            .push_card(common, CardKind::Log { entries })
             .await
             .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
 
