@@ -169,9 +169,5 @@ fn draw(f: &mut ratatui::Frame, snap: &UiSnapshot, focused_idx: usize, expanded:
         );
     }
 
-    // Pin sidebar placeholder (Task 30 fills this in).
-    let pin_block = ratatui::widgets::Block::default()
-        .borders(ratatui::widgets::Borders::ALL)
-        .title("Pinned");
-    f.render_widget(pin_block, body[1]);
+    crate::tui::pins::render(f, body[1], &snap.pins);
 }
