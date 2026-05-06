@@ -34,3 +34,40 @@ pub fn render(f: &mut Frame, area: Rect, pins: &[(String, Card)]) {
         render_body(f, body_area, card);
     }
 }
+
+/// Returns the number of pin columns to render at the given terminal width.
+/// Thresholds match the design: 1 col below 80, 2 cols 80–119, 3 cols ≥120.
+pub fn layout_columns(width: u16) -> usize {
+    if width < 80 {
+        1
+    } else if width < 120 {
+        2
+    } else {
+        3
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_column_below_80() {
+        assert_eq!(layout_columns(0), 1);
+        assert_eq!(layout_columns(79), 1);
+    }
+
+    #[test]
+    fn two_columns_at_80_through_119() {
+        assert_eq!(layout_columns(80), 2);
+        assert_eq!(layout_columns(100), 2);
+        assert_eq!(layout_columns(119), 2);
+    }
+
+    #[test]
+    fn three_columns_at_120_and_up() {
+        assert_eq!(layout_columns(120), 3);
+        assert_eq!(layout_columns(200), 3);
+        assert_eq!(layout_columns(u16::MAX), 3);
+    }
+}
