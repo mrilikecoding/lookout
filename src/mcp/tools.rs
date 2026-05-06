@@ -293,6 +293,26 @@ pub struct ShowProgressArgs {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UnpinArgs {
+    /// Pin-slot name to release.
+    pub slot: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ClearFeedArgs {}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetSessionLabelArgs {
+    /// Session ID to label.
+    pub session: String,
+    /// Display label for the session.
+    pub label: String,
+    /// Optional color slot (0..=15).
+    #[serde(default)]
+    pub color: Option<u8>,
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RawStatusField {
     /// Label for the field.
@@ -798,6 +818,53 @@ impl LookoutServer {
         let CardId(uuid) = card.id;
         Ok(CallToolResult::success(vec![rmcp::model::Content::text(
             format!("ok:{uuid}"),
+        )]))
+    }
+
+    /// Release a pin slot.
+    #[tool(description = "Release a pin slot.")]
+    pub async fn unpin(
+        &self,
+        Parameters(args): Parameters<UnpinArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        self.cmds
+            .send(Command::Unpin { slot: args.slot.clone() })
+            .await
+            .map_err(|_| ErrorData::internal_error("overloaded", None))?;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{}", args.slot),
+        )]))
+    }
+
+    /// Clear the feed. Does not affect pins.
+    #[tool(description = "Clear the feed. Does not affect pins.")]
+    pub async fn clear_feed(
+        &self,
+        Parameters(_args): Parameters<ClearFeedArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        self.cmds
+            .send(Command::ClearFeed)
+            .await
+            .map_err(|_| ErrorData::internal_error("overloaded", None))?;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text("ok")]))
+    }
+
+    /// Give a session/connection a stable display label and optional color (0..=15).
+    #[tool(description = "Give a session/connection a stable display label and optional color (0..=15).")]
+    pub async fn set_session_label(
+        &self,
+        Parameters(args): Parameters<SetSessionLabelArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        self.cmds
+            .send(Command::SetSessionLabel {
+                session: args.session.clone(),
+                label: args.label.clone(),
+                color: args.color,
+            })
+            .await
+            .map_err(|_| ErrorData::internal_error("overloaded", None))?;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{}", args.session),
         )]))
     }
 }
