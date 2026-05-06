@@ -267,6 +267,28 @@ impl TuiApp {
                                     .cmd_tx
                                     .try_send(crate::state::Command::ClearFeed);
                             }
+                            KeyCode::Char('x') => {
+                                if self.focus != FocusRegion::Pins {
+                                    // No-op when focus is on the feed.
+                                } else {
+                                    let snap = self.snapshot.lock().unwrap();
+                                    if let Some((slot, _)) = snap.pins.get(self.pin_focused_idx).cloned() {
+                                        drop(snap);
+                                        // If the removed pin was zoomed, exit zoom.
+                                        if self.zoomed_pin.as_deref() == Some(slot.as_str()) {
+                                            self.zoomed_pin = None;
+                                        }
+                                        // If we're removing the last pin in the list, step focus back.
+                                        let new_len = self.snapshot.lock().unwrap().pins.len().saturating_sub(1);
+                                        if self.pin_focused_idx >= new_len && self.pin_focused_idx > 0 {
+                                            self.pin_focused_idx -= 1;
+                                        }
+                                        let _ = self
+                                            .cmd_tx
+                                            .try_send(crate::state::Command::Unpin { slot });
+                                    }
+                                }
+                            }
                             KeyCode::Char('/') => {
                                 self.filter_prompt = Some(String::new());
                             }
