@@ -16,6 +16,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
+/// Which region of the TUI currently owns keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusRegion {
+    Pins,
+    Feed,
+}
+
 /// Read-only view of the parts of AppState the TUI needs.
 #[derive(Clone, Default)]
 pub struct UiSnapshot {
@@ -31,8 +38,12 @@ pub struct TuiApp {
     /// (We pass a closure to keep the AppState ownership in the state task.)
     refresh: Arc<dyn Fn() -> UiSnapshot + Send + Sync>,
     cmd_tx: tokio::sync::mpsc::Sender<crate::state::Command>,
-    focused_idx: usize,
+    focus: FocusRegion,
+    pin_focused_idx: usize,
+    feed_focused_idx: usize,
     expanded: Option<crate::card::CardId>,
+    zoomed_pin: Option<String>,
+    feed_compact: bool,
     filter: crate::tui::filter::FilterState,
     /// When `Some`, we're in filter prompt mode and the buffer holds the typed query.
     filter_prompt: Option<String>,
@@ -50,8 +61,12 @@ impl TuiApp {
             deltas,
             refresh,
             cmd_tx,
-            focused_idx: 0,
+            focus: FocusRegion::Pins,
+            pin_focused_idx: 0,
+            feed_focused_idx: 0,
             expanded: None,
+            zoomed_pin: None,
+            feed_compact: true,
             filter: crate::tui::filter::FilterState::default(),
             filter_prompt: None,
         }
@@ -84,15 +99,15 @@ impl TuiApp {
                 *self.snapshot.lock().unwrap() = fresh;
             }
 
-            // Clamp focused_idx to valid range after any refresh.
+            // Clamp feed_focused_idx to valid range after any refresh.
             let snap = self.snapshot.lock().unwrap().clone();
             if !snap.feed.is_empty() {
-                self.focused_idx = self.focused_idx.min(snap.feed.len() - 1);
+                self.feed_focused_idx = self.feed_focused_idx.min(snap.feed.len() - 1);
             }
 
             // Render.
             terminal.draw(|f| {
-                draw(f, &snap, self.focused_idx, self.expanded, &self.filter, self.filter_prompt.as_deref())
+                draw(f, &snap, self.feed_focused_idx, self.expanded, &self.filter, self.filter_prompt.as_deref())
             })?;
 
             // Poll for keyboard or sleep until next tick.
@@ -153,13 +168,13 @@ impl TuiApp {
                             }
                             KeyCode::Char('j') | KeyCode::Down => {
                                 let len = self.snapshot.lock().unwrap().feed.len();
-                                if self.focused_idx + 1 < len {
-                                    self.focused_idx += 1;
+                                if self.feed_focused_idx + 1 < len {
+                                    self.feed_focused_idx += 1;
                                 }
                             }
                             KeyCode::Char('k') | KeyCode::Up => {
-                                if self.focused_idx > 0 {
-                                    self.focused_idx -= 1;
+                                if self.feed_focused_idx > 0 {
+                                    self.feed_focused_idx -= 1;
                                 }
                             }
                             KeyCode::Char('o') | KeyCode::Enter => {
@@ -167,7 +182,7 @@ impl TuiApp {
                                 if !snap.feed.is_empty() {
                                     // Newest at top: card at displayed index `i` is feed[len - 1 - i].
                                     let len = snap.feed.len();
-                                    let idx = self.focused_idx.min(len - 1);
+                                    let idx = self.feed_focused_idx.min(len - 1);
                                     let card_idx = len - 1 - idx;
                                     let id = snap.feed[card_idx].id;
                                     drop(snap);
@@ -186,7 +201,7 @@ impl TuiApp {
                                 let snap = self.snapshot.lock().unwrap();
                                 if !snap.feed.is_empty() {
                                     let len = snap.feed.len();
-                                    let idx = self.focused_idx.min(len - 1);
+                                    let idx = self.feed_focused_idx.min(len - 1);
                                     let card_idx = len - 1 - idx;
                                     let mut card = snap.feed[card_idx].clone();
                                     drop(snap);
@@ -202,7 +217,7 @@ impl TuiApp {
                                 let snap = self.snapshot.lock().unwrap();
                                 if !snap.feed.is_empty() {
                                     let len = snap.feed.len();
-                                    let idx = self.focused_idx.min(len - 1);
+                                    let idx = self.feed_focused_idx.min(len - 1);
                                     let card_idx = len - 1 - idx;
                                     if let Some(slot) = snap.feed[card_idx].pin_slot.clone() {
                                         drop(snap);
