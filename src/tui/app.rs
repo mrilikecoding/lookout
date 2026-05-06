@@ -225,24 +225,37 @@ impl TuiApp {
                                     }
                                 }
                             },
-                            KeyCode::Char('o') | KeyCode::Enter => {
-                                let snap = self.snapshot.lock().unwrap();
-                                if !snap.feed.is_empty() {
-                                    // Newest at top: card at displayed index `i` is feed[len - 1 - i].
-                                    let len = snap.feed.len();
-                                    let idx = self.feed_focused_idx.min(len - 1);
-                                    let card_idx = len - 1 - idx;
-                                    let id = snap.feed[card_idx].id;
-                                    drop(snap);
-                                    if self.expanded == Some(id) {
-                                        self.expanded = None;
-                                    } else {
-                                        self.expanded = Some(id);
+                            KeyCode::Char('o') | KeyCode::Enter => match self.focus {
+                                FocusRegion::Pins => {
+                                    let snap = self.snapshot.lock().unwrap();
+                                    if let Some((slot, _)) = snap.pins.get(self.pin_focused_idx).cloned() {
+                                        drop(snap);
+                                        if self.zoomed_pin.as_deref() == Some(slot.as_str()) {
+                                            self.zoomed_pin = None;
+                                        } else {
+                                            self.zoomed_pin = Some(slot);
+                                        }
                                     }
                                 }
-                            }
+                                FocusRegion::Feed => {
+                                    let snap = self.snapshot.lock().unwrap();
+                                    if !snap.feed.is_empty() {
+                                        let len = snap.feed.len();
+                                        let idx = self.feed_focused_idx.min(len - 1);
+                                        let card_idx = len - 1 - idx;
+                                        let id = snap.feed[card_idx].id;
+                                        drop(snap);
+                                        if self.expanded == Some(id) {
+                                            self.expanded = None;
+                                        } else {
+                                            self.expanded = Some(id);
+                                        }
+                                    }
+                                }
+                            },
                             KeyCode::Esc => {
                                 self.expanded = None;
+                                self.zoomed_pin = None;
                             }
                             KeyCode::Char('p') => {
                                 // Pin focused card to a slot named "pinned:<short_id>".
