@@ -107,6 +107,10 @@ impl TuiApp {
             if !snap.pins.is_empty() {
                 self.pin_focused_idx = self.pin_focused_idx.min(snap.pins.len() - 1);
             }
+            // If pins emptied out while focus was on the Pins region, transfer focus.
+            if snap.pins.is_empty() && self.focus == FocusRegion::Pins {
+                self.focus = FocusRegion::Feed;
+            }
 
             // Render.
             terminal.draw(|f| {
@@ -303,11 +307,6 @@ impl TuiApp {
                                         // If the removed pin was zoomed, exit zoom.
                                         if self.zoomed_pin.as_deref() == Some(slot.as_str()) {
                                             self.zoomed_pin = None;
-                                        }
-                                        // If we're removing the last pin in the list, step focus back.
-                                        let new_len = self.snapshot.lock().unwrap().pins.len().saturating_sub(1);
-                                        if self.pin_focused_idx >= new_len && self.pin_focused_idx > 0 {
-                                            self.pin_focused_idx -= 1;
                                         }
                                         let _ = self
                                             .cmd_tx
