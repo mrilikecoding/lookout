@@ -29,8 +29,11 @@ assert_contains "multi-step" "$out" "SessionStart names the multi-step trigger"
 
 # --- UserPromptSubmit ---
 out="$(printf '{"hook_event_name":"UserPromptSubmit"}' | "$HOOK")"
-assert_contains "lookout" "$out" "UserPromptSubmit mentions lookout"
-assert_contains "show_" "$out" "UserPromptSubmit mentions show_* tools"
+assert_contains "Lookout active" "$out" "UserPromptSubmit opens with status preamble"
+assert_contains "git ops" "$out" "UserPromptSubmit lists git trigger"
+assert_contains "test/build" "$out" "UserPromptSubmit lists test/build trigger"
+assert_contains "structured output" "$out" "UserPromptSubmit lists structured-output trigger"
+assert_contains "subagent" "$out" "UserPromptSubmit lists subagent trigger"
 assert_contains "lookout-companion" "$out" "UserPromptSubmit references the skill"
 
 

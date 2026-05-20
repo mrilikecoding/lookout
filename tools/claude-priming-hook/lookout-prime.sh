@@ -25,7 +25,7 @@ case "$event" in
         emit "Lookout is running at http://127.0.0.1:9477/mcp, an MCP visualizer TUI the user is watching in another pane. PUSH cards on these triggers (don't deliberate, do it): before any git operation, show_status naming the action + branch state; after running tests or builds, show_log or show_status with results; when you'd produce a table, tree, diff, or long enumeration, push the structured form to lookout, not just in chat; before dispatching a subagent, show_status naming the delegation; when starting a multi-step task, open with show_status, update in place as you advance. Call set_session_label once early with a short label naming the work. Reuse card_id to update cards rather than spamming new ones. See the lookout-companion skill for the card-type catalog. Chat for prose; lookout for state."
         ;;
     UserPromptSubmit)
-        emit "Lookout reminder: push notable structured or visual output to lookout via show_* as you work. See lookout-companion if unsure what to push."
+        emit "Lookout active. Push on: git ops, test/build results, structured output (tables/trees/diffs/long lists), subagent dispatch, multi-step starts. Update via card_id + pin rather than new cards. See lookout-companion if unsure."
         ;;
     PostToolUse)
         # settings.json's matcher already filters to Agent in production; this
