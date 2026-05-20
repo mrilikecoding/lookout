@@ -27,6 +27,12 @@ case "$event" in
     UserPromptSubmit)
         emit "Lookout reminder: push notable structured or visual output to lookout via show_* as you work. See lookout-companion if unsure what to push."
         ;;
+    PostToolUse)
+        tool="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+        if [ "$tool" = "Agent" ]; then
+            emit "A subagent just returned. If their result has anything worth glancing at (findings, structured data, diffs, summaries), push it to lookout as a card before folding it into your reply."
+        fi
+        ;;
     *) : ;;
 esac
 
