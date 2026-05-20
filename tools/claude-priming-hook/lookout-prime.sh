@@ -32,7 +32,7 @@ case "$event" in
         # check makes the script self-defensive if anyone reuses or rewires it.
         tool="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)"
         if [ "$tool" = "Agent" ]; then
-            emit "A subagent just returned. If their result has anything worth glancing at (findings, structured data, diffs, summaries), push it to lookout as a card before folding it into your reply."
+            emit "Subagent returned. Push their findings as a show_* card before folding into your reply (show_table for enumerations, show_diff for changes, show_status for state). Skip only if the result is one line of prose."
         fi
         ;;
     *) : ;;
