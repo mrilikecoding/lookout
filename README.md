@@ -45,6 +45,12 @@ Lookout exposes 13 tools: `show_text`, `show_table`, `show_chart`, `show_tree`,
     c                 clear feed (pins remain)
     q / Ctrl-C        quit (graceful drain)
 
+## Claude Code integration
+
+If you use Claude Code, see `tools/claude-priming-hook/` for an
+installable hook + skill that keeps Claude reminded to push glanceable
+state to lookout as it works.
+
 ## License
 
 MIT
