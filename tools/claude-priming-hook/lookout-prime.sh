@@ -24,6 +24,9 @@ case "$event" in
     SessionStart)
         emit "Lookout is running at http://127.0.0.1:9477/mcp. It is an MCP visualizer TUI that accepts show_text, show_table, show_chart, show_tree, show_diff, show_log, show_image, show_progress, show_status, show_question. Push anything the user would want to glance at without cluttering this chat: structured findings, long outputs, in-flight progress, status of long-running work. See the lookout-companion skill for what counts as interesting and which card type fits when. Call set_session_label once early so this session is distinguishable in lookout. When dispatching a subagent for long-horizon work, push a show_status card naming the delegation first so the user can watch it unfold."
         ;;
+    UserPromptSubmit)
+        emit "Lookout reminder: push notable structured or visual output to lookout via show_* as you work. See lookout-companion if unsure what to push."
+        ;;
     *) : ;;
 esac
 

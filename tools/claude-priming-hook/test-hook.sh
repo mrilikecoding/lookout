@@ -22,4 +22,11 @@ assert_contains "lookout-companion" "$out" "SessionStart references the skill"
 assert_contains "set_session_label" "$out" "SessionStart mentions session label convention"
 assert_contains "subagent" "$out" "SessionStart mentions subagent dispatch guidance"
 
+
+# --- UserPromptSubmit ---
+out="$(printf '{"hook_event_name":"UserPromptSubmit"}' | "$HOOK")"
+assert_contains "lookout" "$out" "UserPromptSubmit mentions lookout"
+assert_contains "show_" "$out" "UserPromptSubmit mentions show_* tools"
+assert_contains "lookout-companion" "$out" "UserPromptSubmit references the skill"
+
 exit "$FAIL"
