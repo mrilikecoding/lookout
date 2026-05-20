@@ -62,8 +62,7 @@ impl TestServer {
 
         let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
             Arc::new(move || label.to_string());
-        let server =
-            McpServer::bind(0, cmd_tx.clone(), default_session, allowlist).await?;
+        let server = McpServer::bind(0, cmd_tx.clone(), default_session, allowlist).await?;
         let url = server.url();
         let client = reqwest::Client::new();
         let session_id = initialize(&client, &url, label).await?;
@@ -127,12 +126,7 @@ impl TestServer {
         name: &str,
         arguments: serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
-        match tokio::time::timeout(
-            Duration::from_secs(2),
-            self.call_tool(name, arguments),
-        )
-        .await
-        {
+        match tokio::time::timeout(Duration::from_secs(2), self.call_tool(name, arguments)).await {
             Ok(r) => r,
             Err(_) => panic!("tool call '{name}' hung for 2 seconds"),
         }
@@ -149,7 +143,6 @@ impl TestServer {
             .post(&self.url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
-            .header("mcp-session-id", &self.session_id)
             .json(&serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 2,
@@ -162,8 +155,13 @@ impl TestServer {
             anyhow::bail!("tools/call returned {}", resp.status());
         }
         let body = resp.text().await?;
+        // Stateless mode with json_response=true returns plain JSON, not SSE.
+        // Try JSON parse first; fall back to SSE extraction for forward-compat.
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+            return Ok(v);
+        }
         extract_sse_data(&body)
-            .ok_or_else(|| anyhow::anyhow!("no SSE data in response"))
+            .ok_or_else(|| anyhow::anyhow!("no parseable response in body: {body}"))
     }
 
     /// Wait up to one second for a delta matching `pred`. Unrelated deltas
@@ -185,10 +183,8 @@ impl TestServer {
 
     /// Wait for any `CardPushed { in_feed: true }` delta.
     pub async fn recv_card_pushed(&mut self) -> anyhow::Result<StateDelta> {
-        self.recv_matching(|d| {
-            matches!(d, StateDelta::CardPushed { in_feed: true, .. })
-        })
-        .await
+        self.recv_matching(|d| matches!(d, StateDelta::CardPushed { in_feed: true, .. }))
+            .await
     }
 
     pub fn shutdown(self) {
@@ -199,8 +195,7 @@ impl TestServer {
 /// Tool-call response indicates an error (either JSON-RPC error envelope or
 /// `result.isError = true`).
 pub fn response_is_error(parsed: &serde_json::Value) -> bool {
-    parsed.get("error").is_some()
-        || parsed["result"]["isError"].as_bool().unwrap_or(false)
+    parsed.get("error").is_some() || parsed["result"]["isError"].as_bool().unwrap_or(false)
 }
 
 /// Tool-call response carries an `ok:<uuid>` success payload.
@@ -208,11 +203,7 @@ pub fn response_ok_text(parsed: &serde_json::Value) -> Option<&str> {
     parsed["result"]["content"][0]["text"].as_str()
 }
 
-async fn initialize(
-    client: &reqwest::Client,
-    url: &str,
-    label: &str,
-) -> anyhow::Result<String> {
+async fn initialize(client: &reqwest::Client, url: &str, label: &str) -> anyhow::Result<String> {
     let resp = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -232,19 +223,16 @@ async fn initialize(
     if resp.status() != 200 {
         anyhow::bail!("initialize returned {}", resp.status());
     }
-    let session_id = resp
-        .headers()
-        .get("mcp-session-id")
-        .ok_or_else(|| anyhow::anyhow!("missing mcp-session-id header"))?
-        .to_str()?
-        .to_owned();
+    // Stateless mode: no mcp-session-id header; session_id is unused by callers.
     let _ = resp.text().await?;
 
+    // Send notifications/initialized without a session ID. In stateless mode
+    // the server ignores notifications, so this is a no-op but keeps the MCP
+    // handshake well-formed for forward-compat.
     let resp = client
         .post(url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream")
-        .header("mcp-session-id", &session_id)
         .json(&serde_json::json!({
             "jsonrpc": "2.0",
             "method": "notifications/initialized"
@@ -254,5 +242,5 @@ async fn initialize(
     if !(resp.status() == 200 || resp.status() == 202) {
         anyhow::bail!("initialized returned {}", resp.status());
     }
-    Ok(session_id)
+    Ok(String::new())
 }
