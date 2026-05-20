@@ -36,6 +36,15 @@ assert_contains "subagent" "$out" "PostToolUse mentions subagent"
 assert_contains "lookout" "$out" "PostToolUse mentions lookout"
 assert_contains "worth glancing at" "$out" "PostToolUse frames the heuristic"
 
+# --- PostToolUse with non-Agent tool: must stay silent ---
+out="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash"}' | "$HOOK")"
+if [ -z "$out" ]; then
+    echo "PASS: PostToolUse non-Agent tool emits nothing"
+else
+    echo "FAIL: PostToolUse non-Agent tool should be silent (got: $out)"
+    FAIL=1
+fi
+
 # --- Safety: unknown event ---
 out="$(printf '{"hook_event_name":"NotARealEvent"}' | "$HOOK")"
 if [ -z "$out" ]; then

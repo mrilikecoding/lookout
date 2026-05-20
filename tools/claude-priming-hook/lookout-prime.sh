@@ -2,7 +2,7 @@
 # lookout-prime.sh: emits priming context for Claude sessions, reminding
 # the agent that lookout is available and worth pushing to.
 #
-# Spike findings (2026-05-20, see .spike-findings.md):
+# Hook contract:
 #   - stdin: JSON with hook_event_name and event-specific fields.
 #   - stdout: JSON {"hookSpecificOutput":{"hookEventName":...,"additionalContext":...}}
 #     for events that support context injection (SessionStart, UserPromptSubmit,
@@ -28,6 +28,8 @@ case "$event" in
         emit "Lookout reminder: push notable structured or visual output to lookout via show_* as you work. See lookout-companion if unsure what to push."
         ;;
     PostToolUse)
+        # settings.json's matcher already filters to Agent in production; this
+        # check makes the script self-defensive if anyone reuses or rewires it.
         tool="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)"
         if [ "$tool" = "Agent" ]; then
             emit "A subagent just returned. If their result has anything worth glancing at (findings, structured data, diffs, summaries), push it to lookout as a card before folding it into your reply."
