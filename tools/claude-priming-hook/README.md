@@ -34,12 +34,18 @@ for the why and what.
 
 3. Merge the hook entries into `~/.claude/settings.json`. If the file
    has no `hooks` key, paste the fragment's `hooks` block in. If it
-   already has a `hooks` key, merge each event array:
+   already has a `hooks` key, merge with `jq`:
 
        jq -s '.[0] * .[1]' ~/.claude/settings.json \
            tools/claude-priming-hook/settings.fragment.json \
            > ~/.claude/settings.json.new
        mv ~/.claude/settings.json.new ~/.claude/settings.json
+
+   Warning: `jq`'s `*` is a recursive object merge but it REPLACES arrays
+   instead of concatenating them. If you already have entries on
+   `SessionStart`, `UserPromptSubmit`, or `PostToolUse`, this merge will
+   drop them. Back up your settings first (`cp ~/.claude/settings.json{,.bak}`)
+   and inspect the diff, or merge the three event arrays by hand.
 
    Verify:
 
