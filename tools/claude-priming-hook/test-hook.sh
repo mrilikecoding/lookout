@@ -20,21 +20,30 @@ out="$(printf '{"hook_event_name":"SessionStart"}' | "$HOOK")"
 assert_contains "127.0.0.1:9477/mcp" "$out" "SessionStart mentions lookout URL"
 assert_contains "lookout-companion" "$out" "SessionStart references the skill"
 assert_contains "set_session_label" "$out" "SessionStart mentions session label convention"
-assert_contains "subagent" "$out" "SessionStart mentions subagent dispatch guidance"
+assert_contains "git operation" "$out" "SessionStart names the git trigger"
+assert_contains "tests or builds" "$out" "SessionStart names the test/build trigger"
+assert_contains "table, tree, diff" "$out" "SessionStart names the structured-output trigger"
+assert_contains "subagent" "$out" "SessionStart names the subagent trigger"
+assert_contains "multi-step" "$out" "SessionStart names the multi-step trigger"
 
 
 # --- UserPromptSubmit ---
 out="$(printf '{"hook_event_name":"UserPromptSubmit"}' | "$HOOK")"
-assert_contains "lookout" "$out" "UserPromptSubmit mentions lookout"
-assert_contains "show_" "$out" "UserPromptSubmit mentions show_* tools"
+assert_contains "Lookout active" "$out" "UserPromptSubmit opens with status preamble"
+assert_contains "git ops" "$out" "UserPromptSubmit lists git trigger"
+assert_contains "test/build" "$out" "UserPromptSubmit lists test/build trigger"
+assert_contains "structured output" "$out" "UserPromptSubmit lists structured-output trigger"
+assert_contains "subagent" "$out" "UserPromptSubmit lists subagent trigger"
 assert_contains "lookout-companion" "$out" "UserPromptSubmit references the skill"
 
 
 # --- PostToolUse (subagent return) ---
 out="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Agent"}' | "$HOOK")"
-assert_contains "subagent" "$out" "PostToolUse mentions subagent"
-assert_contains "lookout" "$out" "PostToolUse mentions lookout"
-assert_contains "worth glancing at" "$out" "PostToolUse frames the heuristic"
+assert_contains "Subagent returned" "$out" "PostToolUse opens with return statement"
+assert_contains "show_table" "$out" "PostToolUse names show_table for enumerations"
+assert_contains "show_diff" "$out" "PostToolUse names show_diff for changes"
+assert_contains "show_status" "$out" "PostToolUse names show_status for state"
+assert_contains "before folding" "$out" "PostToolUse instructs push-before-fold ordering"
 
 # --- PostToolUse with non-Agent tool: must stay silent ---
 out="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash"}' | "$HOOK")"

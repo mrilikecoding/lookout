@@ -9,22 +9,36 @@ Lookout is a TUI visualizer running at http://127.0.0.1:9477/mcp. The user
 is watching it in another pane. Push things they would want to glance at;
 keep this chat for prose.
 
-## What to push
+## Triggers (push on every occurrence)
 
-PUSH:
-- Structured findings (tables, trees, diffs). Anything that reads better
-  in 2D than in chat.
-- In-flight progress. `show_progress` updated in place.
-- Status of multi-step work. `show_status` with key/value fields.
-- Subagent dispatch and return. So the user can follow long-horizon work.
-- Big outputs that would otherwise dominate the chat (log dumps, build
-  output, search results).
+These rules override judgment. Don't ask "is this interesting?"; when a
+trigger fires, push.
 
-DO NOT PUSH:
-- Trivial confirmations ("read file X", "ran command Y").
-- Your own prose. Responses belong in the conversation.
+1. **Git operations.** Before any commit, merge, branch, or push: push a
+   `show_status` card with the action you're about to take and current
+   branch state (ahead/behind, dirty files). Update the same card after
+   the operation completes.
+2. **Tests and builds.** Whenever you run a test suite or build command,
+   push the results as `show_log` (raw output) or `show_status` (summary:
+   pass/fail counts, duration). Reuse the same `pin` slot to update in
+   place rather than spamming new cards.
+3. **Structured output.** Whenever you would produce a table, tree, diff,
+   or list of more than ~5 items in chat, push it as the matching
+   `show_*` card. The chat gets a one-line summary; lookout gets the
+   structured view.
+4. **Subagent dispatch.** Before you fire a subagent: push a `show_status`
+   naming what you're delegating and to whom. After the subagent returns:
+   push their findings as a card before integrating into your reply.
+5. **Multi-step tasks.** When starting a task with more than ~3 substeps:
+   push a `show_status` listing the steps and their state. Update it in
+   place as you advance.
+
+## Don't push
+
+- Trivial confirmations ("read file X", "ran ls").
+- Your own prose. Conversation stays in chat.
 - Secrets, credentials, `.env` contents.
-- Things the user just directly asked a question about. Answer in chat.
+- The user's direct question; answer in chat first.
 
 ## Card types
 
@@ -62,5 +76,4 @@ DO NOT PUSH:
 
 ## When in doubt
 
-Push if the user would benefit from seeing it without scrolling back
-through this chat. Skip if it belongs in the conversation itself.
+Rules first. Judgment only for cases the rules don't cover.
