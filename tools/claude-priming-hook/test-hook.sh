@@ -20,7 +20,11 @@ out="$(printf '{"hook_event_name":"SessionStart"}' | "$HOOK")"
 assert_contains "127.0.0.1:9477/mcp" "$out" "SessionStart mentions lookout URL"
 assert_contains "lookout-companion" "$out" "SessionStart references the skill"
 assert_contains "set_session_label" "$out" "SessionStart mentions session label convention"
-assert_contains "subagent" "$out" "SessionStart mentions subagent dispatch guidance"
+assert_contains "git operation" "$out" "SessionStart names the git trigger"
+assert_contains "tests or builds" "$out" "SessionStart names the test/build trigger"
+assert_contains "table, tree, diff" "$out" "SessionStart names the structured-output trigger"
+assert_contains "subagent" "$out" "SessionStart names the subagent trigger"
+assert_contains "multi-step" "$out" "SessionStart names the multi-step trigger"
 
 
 # --- UserPromptSubmit ---
