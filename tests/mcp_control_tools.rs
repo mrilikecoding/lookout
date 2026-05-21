@@ -57,7 +57,7 @@ async fn set_session_label_emits_session_updated_delta() -> anyhow::Result<()> {
         )
         .await?;
     assert!(response_ok_text(&parsed).unwrap_or("").starts_with("ok:"));
-    s.recv_matching(|d| matches!(d, StateDelta::SessionUpdated(_)))
+    s.recv_matching(|d| matches!(d, StateDelta::SessionUpdated { .. }))
         .await?;
 
     s.shutdown();

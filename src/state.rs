@@ -34,7 +34,7 @@ pub enum StateDelta {
     PinReplaced { slot: String },
     PinRemoved { slot: String },
     FeedCleared,
-    SessionUpdated(SessionId),
+    SessionUpdated { session: SessionId },
 }
 
 impl AppState {
@@ -140,7 +140,7 @@ impl AppState {
         if let Some(c) = color {
             entry.color = c;
         }
-        StateDelta::SessionUpdated(session.clone())
+        StateDelta::SessionUpdated { session: session.clone() }
     }
 
     fn touch_session(&mut self, session: &SessionId) {
@@ -371,5 +371,31 @@ mod snapshot_tests {
         let snap = s.snapshot();
         let json = serde_json::to_string(&snap).expect("serialize");
         assert!(json.contains(r#""kind":"snapshot""#), "expected kind=snapshot in: {json}");
+    }
+
+    #[test]
+    fn all_variants_round_trip() {
+        // Internally-tagged enums (#[serde(tag = "kind")]) require every variant
+        // to serialize as a map. Newtype variants holding primitives break this.
+        // Exercise each variant that the /events SSE endpoint can emit so a
+        // future regression of this kind fails the suite, not production.
+        let cases: Vec<StateDelta> = vec![
+            StateDelta::CardPushed {
+                id: crate::card::CardId(uuid::Uuid::nil()),
+                in_feed: true,
+                pin_slot: None,
+            },
+            StateDelta::CardEvicted { id: crate::card::CardId(uuid::Uuid::nil()) },
+            StateDelta::PinReplaced { slot: "deploy".into() },
+            StateDelta::PinRemoved { slot: "deploy".into() },
+            StateDelta::FeedCleared,
+            StateDelta::SessionUpdated { session: "alpha".into() },
+        ];
+        for d in cases {
+            let j = serde_json::to_string(&d)
+                .unwrap_or_else(|e| panic!("serialize failed for {d:?}: {e}"));
+            let _: StateDelta = serde_json::from_str(&j)
+                .unwrap_or_else(|e| panic!("deserialize failed for {j}: {e}"));
+        }
     }
 }
