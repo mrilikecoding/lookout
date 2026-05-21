@@ -17,7 +17,10 @@ for the why and what.
         "lookout": { "type": "http", "url": "http://127.0.0.1:9477/mcp" }
       }
 
-- Lookout running locally (`cargo run` in this repo).
+- Lookout running locally. For attach-anytime workflows, run `lookout serve`
+  in a long-running terminal (or as a LaunchAgent/systemd unit) and open
+  `lookout view` whenever you want to watch the feed. For single-shot use,
+  plain `cargo run` (server + TUI in one process) works fine.
 
 ## Install
 

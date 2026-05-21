@@ -9,11 +9,22 @@ render well as text in the active session, it proxies output to lookout
 instead. Glanceable in one terminal, pinnable for current state, no context
 inflation in the originating chat.
 
-## Run
+## Run modes
 
-    cargo run                   # listens on http://127.0.0.1:9477/mcp
-    cargo run -- --port 9999    # different port
-    cargo run --example smoke   # push one of every card type to a running server
+    cargo run                   # default: server + TUI in one process
+    cargo run -- serve          # headless server, no TUI; ideal as a long-running background process
+    cargo run -- view           # attach a TUI to a running `serve` over SSE
+    cargo run -- view --url http://127.0.0.1:9477   # explicit serve URL
+
+The default mode (no subcommand) keeps today's behavior: one process
+runs the MCP server and the TUI together.
+
+`serve` accepts MCP traffic identically but renders no TUI. Run it at
+login (LaunchAgent / systemd-user-unit) and attach `view` ad hoc when
+you want to watch. Multiple `view` processes can attach concurrently.
+
+To push test cards: `cargo run --example smoke` (against any of the
+modes).
 
 ## Connect from an MCP client
 
