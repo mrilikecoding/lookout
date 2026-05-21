@@ -8,13 +8,13 @@
 
 #![allow(dead_code)] // not every consumer uses every helper
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lookout::card::SessionId;
 use lookout::imagepaths::ImagePathAllowlist;
 use lookout::mcp::server::McpServer;
-use lookout::state::{state_task, AppState, Command, StateDelta};
+use lookout::state::{AppState, Command, StateDelta};
 use tokio::sync::{broadcast, mpsc};
 
 /// Parse an SSE body and extract the JSON `data:` field from the *last*
@@ -55,13 +55,46 @@ impl TestServer {
         label: &'static str,
         allowlist: ImagePathAllowlist,
     ) -> anyhow::Result<Self> {
-        let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(16);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(16);
         let (delta_tx, delta_rx) = broadcast::channel::<StateDelta>(32);
-        tokio::spawn(state_task(AppState::new(32), cmd_rx, delta_tx));
+        let state = Arc::new(Mutex::new(AppState::new(32)));
+
+        let state_for_loop = state.clone();
+        let delta_tx_for_loop = delta_tx.clone();
+        tokio::spawn(async move {
+            while let Some(cmd) = cmd_rx.recv().await {
+                let deltas: Vec<StateDelta> = {
+                    let mut s = state_for_loop.lock().unwrap();
+                    match cmd {
+                        Command::PushCard(card) => s.push(card),
+                        Command::Unpin { slot } => s.unpin(&slot).into_iter().collect(),
+                        Command::ClearFeed => vec![s.clear_feed()],
+                        Command::SetSessionLabel {
+                            session,
+                            label,
+                            color,
+                        } => {
+                            vec![s.set_session_label(&session, label, color)]
+                        }
+                    }
+                };
+                for d in deltas {
+                    let _ = delta_tx_for_loop.send(d);
+                }
+            }
+        });
 
         let default_session: Arc<dyn Fn() -> SessionId + Send + Sync> =
             Arc::new(move || label.to_string());
-        let server = McpServer::bind(0, cmd_tx.clone(), default_session, allowlist).await?;
+        let server = McpServer::bind(
+            0,
+            cmd_tx.clone(),
+            default_session,
+            allowlist,
+            state,
+            delta_tx.clone(),
+        )
+        .await?;
         let url = server.url();
         let client = reqwest::Client::new();
         initialize(&client, &url, label).await?;
@@ -79,7 +112,8 @@ impl TestServer {
     /// from the tool layer must return `Full` immediately.
     pub async fn boot_saturated(label: &'static str) -> anyhow::Result<Self> {
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(1);
-        let (_delta_tx, delta_rx) = broadcast::channel::<StateDelta>(32);
+        let (delta_tx, delta_rx) = broadcast::channel::<StateDelta>(32);
+        let state = Arc::new(Mutex::new(AppState::new(32)));
 
         // Hold the receiver but never read — keeps the channel alive without draining.
         tokio::spawn(async move {
@@ -101,6 +135,8 @@ impl TestServer {
             cmd_tx.clone(),
             default_session,
             ImagePathAllowlist::new(vec![]),
+            state,
+            delta_tx.clone(),
         )
         .await?;
         let url = server.url();

@@ -1,16 +1,19 @@
 //! Streamable-HTTP MCP server bootstrap.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rmcp::transport::streamable_http_server::{
     session::never::NeverSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    card::SessionId, error::Result, imagepaths::ImagePathAllowlist, mcp::tools::LookoutServer,
-    state::Command,
+    card::SessionId,
+    error::Result,
+    imagepaths::ImagePathAllowlist,
+    mcp::tools::LookoutServer,
+    state::{AppState, Command, StateDelta},
 };
 
 pub struct McpServer {
@@ -25,6 +28,8 @@ impl McpServer {
         cmds: mpsc::Sender<Command>,
         default_session: Arc<dyn Fn() -> SessionId + Send + Sync>,
         image_paths: ImagePathAllowlist,
+        state: Arc<Mutex<AppState>>,
+        delta_tx: broadcast::Sender<StateDelta>,
     ) -> Result<Self> {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
         let addr = listener.local_addr()?;
@@ -53,7 +58,16 @@ impl McpServer {
             );
 
         // Spawn the axum server inline so `bind` returns an already-running server.
-        let router = axum::Router::new().nest_service("/mcp", service.clone());
+        let events_state = crate::mcp::events::EventsState {
+            state: state.clone(),
+            delta_tx: delta_tx.clone(),
+        };
+
+        let router = axum::Router::new()
+            .nest_service("/mcp", service.clone())
+            .route("/events", axum::routing::get(crate::mcp::events::events))
+            .layer(axum::Extension(events_state));
+
         let cancel_cloned = cancel.clone();
         tokio::spawn(async move {
             let _ = axum::serve(listener, router)
@@ -93,13 +107,40 @@ impl McpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{state_task, AppState};
+    use crate::state::{AppState, Command, StateDelta};
+    use std::sync::Mutex;
     use tokio::sync::{broadcast, mpsc};
 
     async fn make_server() -> McpServer {
-        let (cmd_tx, cmd_rx) = mpsc::channel(8);
-        let (delta_tx, _) = broadcast::channel(16);
-        tokio::spawn(state_task(AppState::new(8), cmd_rx, delta_tx));
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(8);
+        let (delta_tx, _) = broadcast::channel::<StateDelta>(16);
+        let state = Arc::new(Mutex::new(AppState::new(8)));
+
+        let state_for_loop = state.clone();
+        let delta_tx_for_loop = delta_tx.clone();
+        tokio::spawn(async move {
+            while let Some(cmd) = cmd_rx.recv().await {
+                let deltas: Vec<StateDelta> = {
+                    let mut s = state_for_loop.lock().unwrap();
+                    match cmd {
+                        Command::PushCard(card) => s.push(card),
+                        Command::Unpin { slot } => s.unpin(&slot).into_iter().collect(),
+                        Command::ClearFeed => vec![s.clear_feed()],
+                        Command::SetSessionLabel {
+                            session,
+                            label,
+                            color,
+                        } => {
+                            vec![s.set_session_label(&session, label, color)]
+                        }
+                    }
+                };
+                for d in deltas {
+                    let _ = delta_tx_for_loop.send(d);
+                }
+            }
+        });
+
         let session_fn: Arc<dyn Fn() -> SessionId + Send + Sync> =
             Arc::new(|| "test-session".to_string());
         McpServer::bind(
@@ -107,6 +148,8 @@ mod tests {
             cmd_tx,
             session_fn,
             crate::imagepaths::ImagePathAllowlist::new(vec![]),
+            state,
+            delta_tx,
         )
         .await
         .unwrap()
@@ -157,6 +200,44 @@ mod tests {
         assert!(
             status.is_success(),
             "expected 2xx for initialize with stale session id, got {status}; body: {body_text}"
+        );
+        s.shutdown();
+    }
+
+    #[tokio::test]
+    async fn events_endpoint_emits_snapshot_first() {
+        let s = make_server().await;
+        // Convert the /mcp URL to /events
+        let base = s.url().trim_end_matches("/mcp").to_string();
+        let events_url = format!("{}/events", base);
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(&events_url)
+            .header("Accept", "text/event-stream")
+            .send()
+            .await
+            .expect("connect");
+        assert!(resp.status().is_success(), "got {}", resp.status());
+        // Read enough of the body to see the snapshot frame.
+        use futures::StreamExt as _;
+        let mut body = resp.bytes_stream();
+        let mut accumulated = String::new();
+        // Pull up to 4 chunks looking for the snapshot event header.
+        for _ in 0..4 {
+            match body.next().await {
+                Some(Ok(bytes)) => {
+                    accumulated.push_str(&String::from_utf8_lossy(&bytes));
+                    if accumulated.contains("event: snapshot") {
+                        break;
+                    }
+                }
+                Some(Err(e)) => panic!("stream error: {e}"),
+                None => break,
+            }
+        }
+        assert!(
+            accumulated.contains("event: snapshot"),
+            "expected snapshot event in initial frames, got: {accumulated}"
         );
         s.shutdown();
     }

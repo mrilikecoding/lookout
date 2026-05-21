@@ -10,6 +10,7 @@ readme = "README.md"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
 async-trait = "0.1"
 
@@ -23,7 +24,7 @@ tui-tree-widget = "0.23"
 rmcp = { version = "1", features = ["server", "transport-streamable-http-server", "macros"] }
 
 # HTTP server (required by rmcp's streamable-HTTP transport)
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
 
 # Serde / schema
 serde = { version = "1", features = ["derive"] }
@@ -60,7 +61,7 @@ base64 = "0.22"
 image = "0.25"
 
 # HTTP client (for examples)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
 [dev-dependencies]
 insta = { version = "1", features = ["yaml", "json"] }

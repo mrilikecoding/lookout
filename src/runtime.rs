@@ -79,6 +79,8 @@ pub async fn run_server(cfg: ServerConfig) -> Result<ServerHandles> {
         cmd_tx.clone(),
         Arc::new(|| SessionId::from("default-session")),
         allowlist,
+        state.clone(),
+        delta_tx.clone(),
     )
     .await?;
     let url = server.url();
