@@ -29,7 +29,7 @@ pub enum StateDelta {
         pins: Vec<(String, Card)>,
         sessions: Vec<(SessionId, SessionInfo)>,
     },
-    CardPushed { id: CardId, in_feed: bool, pin_slot: Option<String> },
+    CardPushed { card: Card, in_feed: bool, pin_slot: Option<String> },
     CardEvicted { id: CardId },
     PinReplaced { slot: String },
     PinRemoved { slot: String },
@@ -85,7 +85,6 @@ impl AppState {
     /// is replaced. The card is also appended to the feed.
     pub fn push(&mut self, card: Card) -> Vec<StateDelta> {
         let mut deltas = Vec::new();
-        let card_id = card.id;
         self.touch_session(&card.session);
         let pin_slot = card.auto_pin_slot();
 
@@ -100,9 +99,9 @@ impl AppState {
                 deltas.push(StateDelta::CardEvicted { id: evicted.id });
             }
         }
-        self.feed.push_back(card);
+        self.feed.push_back(card.clone());
         deltas.push(StateDelta::CardPushed {
-            id: card_id,
+            card,
             in_feed: true,
             pin_slot,
         });
@@ -285,7 +284,7 @@ mod tests {
             _ => None,
         });
         let pushed_id_in_1 = id1.iter().find_map(|d| match d {
-            StateDelta::CardPushed { id, .. } => Some(*id),
+            StateDelta::CardPushed { card, .. } => Some(card.id),
             _ => None,
         });
         assert_eq!(evicted_id_in_3, pushed_id_in_1);
@@ -396,7 +395,7 @@ mod snapshot_tests {
         // future regression of this kind fails the suite, not production.
         let cases: Vec<StateDelta> = vec![
             StateDelta::CardPushed {
-                id: crate::card::CardId(uuid::Uuid::nil()),
+                card: mk_text_card("rt"),
                 in_feed: true,
                 pin_slot: None,
             },

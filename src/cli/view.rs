@@ -106,17 +106,8 @@ pub async fn run(url: String) -> Result<()> {
 }
 
 /// Best-effort delta application. Snapshot replays cards through the public
-/// AppState API. CardPushed/CardEvicted/PinReplaced/PinRemoved/FeedCleared
-/// /SessionUpdated cases need to mutate the mirror so the TUI render is
-/// accurate. They are handled here against the public AppState API.
-///
-/// NOTE: non-Snapshot deltas do NOT update the local mirror because the
-/// wire-level StateDelta variants reference cards by ID without carrying
-/// their bodies. Cards pushed to the server after the initial snapshot will
-/// not appear in the local state, and therefore won't render in the TUI
-/// until the view reconnects and receives a fresh snapshot. This is a known
-/// limitation — see T14 report. A future enhancement could send
-/// fully-hydrated card bodies in CardPushed deltas.
+/// AppState API. CardPushed/PinRemoved/FeedCleared now mutate the mirror so
+/// the TUI render stays accurate on live server updates.
 fn apply_delta(state: &Arc<Mutex<AppState>>, delta: &StateDelta) {
     let mut s = state.lock().unwrap();
     match delta {
@@ -135,8 +126,24 @@ fn apply_delta(state: &Arc<Mutex<AppState>>, delta: &StateDelta) {
                 let _ = s.set_session_label(sid, info.label.clone(), Some(info.color));
             }
         }
-        // Other delta variants carry only IDs, not card bodies, so we can't
-        // apply them to the local mirror without a richer payload. Deferred.
+        StateDelta::CardPushed { card, .. } => {
+            // s.push internally also emits a CardPushed (and possibly PinReplaced)
+            // delta vec, but those are discarded here. The server-side
+            // PinReplaced (if any) arrives right after as its own delta and is
+            // a no-op against the now-pinned local state.
+            let _ = s.push(card.clone());
+        }
+        StateDelta::PinRemoved { slot } => {
+            let _ = s.unpin(slot);
+        }
+        StateDelta::FeedCleared => {
+            let _ = s.clear_feed();
+        }
+        // CardEvicted, PinReplaced, SessionUpdated: rely on the corresponding
+        // CardPushed / Snapshot to keep the local mirror consistent.
+        // CardEvicted in particular requires removing a card from the feed
+        // by id, which AppState doesn't currently expose publicly. The local
+        // feed_max naturally evicts oldest, so it stays roughly in sync.
         _ => {}
     }
 }
