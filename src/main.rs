@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use lookout::error::Result;
 use lookout::runtime::{run_server, ServerConfig};
 use lookout::tui::app::{TuiApp, UiSnapshot};
@@ -18,18 +18,48 @@ struct Args {
     image_paths: Vec<PathBuf>,
     #[arg(long, default_value_t = false)]
     debug: bool,
+    #[command(subcommand)]
+    cmd: Option<Cmd>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Cmd {
+    /// Run server + TUI in one process (default).
+    Tui,
+    /// Run server only, no TUI.
+    Serve,
+    /// Attach a viewer TUI to a running headless server.
+    View {
+        /// URL of the running serve.
+        #[arg(long, default_value = "http://127.0.0.1:9477")]
+        url: String,
+    },
 }
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     let args = Args::parse();
     let _guard = lookout::logging::init(args.debug)?;
-    tracing::info!(port = args.port, max_cards = args.max_cards, "lookout starting");
 
+    match args.cmd.unwrap_or(Cmd::Tui) {
+        Cmd::Tui => run_tui(args.port, args.max_cards, args.image_paths).await,
+        Cmd::Serve => {
+            tracing::info!("serve subcommand not yet implemented");
+            unimplemented!("serve mode lands in P2.T9")
+        }
+        Cmd::View { url: _ } => {
+            tracing::info!("view subcommand not yet implemented");
+            unimplemented!("view mode lands in P2.T13")
+        }
+    }
+}
+
+async fn run_tui(port: u16, max_cards: usize, image_paths: Vec<PathBuf>) -> Result<()> {
+    tracing::info!(port, max_cards, "lookout starting (tui mode)");
     let handles = run_server(ServerConfig {
-        port: args.port,
-        max_cards: args.max_cards,
-        image_paths: args.image_paths,
+        port,
+        max_cards,
+        image_paths,
     })
     .await?;
 
@@ -39,7 +69,11 @@ async fn main() -> Result<()> {
         let s = state_for_refresh.lock().unwrap();
         UiSnapshot {
             feed: s.feed().iter().cloned().collect(),
-            pins: s.pins().iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            pins: s
+                .pins()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             url: url_for_refresh.clone(),
         }
     });
