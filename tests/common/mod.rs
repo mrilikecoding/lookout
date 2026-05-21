@@ -38,7 +38,6 @@ pub fn extract_sse_data(body: &str) -> Option<serde_json::Value> {
 pub struct TestServer {
     pub server: McpServer,
     pub url: String,
-    pub session_id: String,
     pub client: reqwest::Client,
     pub delta_rx: broadcast::Receiver<StateDelta>,
     pub cmd_tx: mpsc::Sender<Command>,
@@ -65,11 +64,10 @@ impl TestServer {
         let server = McpServer::bind(0, cmd_tx.clone(), default_session, allowlist).await?;
         let url = server.url();
         let client = reqwest::Client::new();
-        let session_id = initialize(&client, &url, label).await?;
+        initialize(&client, &url, label).await?;
         Ok(Self {
             server,
             url,
-            session_id,
             client,
             delta_rx,
             cmd_tx,
@@ -107,11 +105,10 @@ impl TestServer {
         .await?;
         let url = server.url();
         let client = reqwest::Client::new();
-        let session_id = initialize(&client, &url, label).await?;
+        initialize(&client, &url, label).await?;
         Ok(Self {
             server,
             url,
-            session_id,
             client,
             delta_rx,
             cmd_tx,
@@ -203,7 +200,7 @@ pub fn response_ok_text(parsed: &serde_json::Value) -> Option<&str> {
     parsed["result"]["content"][0]["text"].as_str()
 }
 
-async fn initialize(client: &reqwest::Client, url: &str, label: &str) -> anyhow::Result<String> {
+async fn initialize(client: &reqwest::Client, url: &str, label: &str) -> anyhow::Result<()> {
     let resp = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -213,7 +210,7 @@ async fn initialize(client: &reqwest::Client, url: &str, label: &str) -> anyhow:
             "id": 1,
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": "2025-06-18",
                 "capabilities": {},
                 "clientInfo": { "name": label, "version": "0.1.0" }
             }
@@ -223,12 +220,10 @@ async fn initialize(client: &reqwest::Client, url: &str, label: &str) -> anyhow:
     if resp.status() != 200 {
         anyhow::bail!("initialize returned {}", resp.status());
     }
-    // Stateless mode: no mcp-session-id header; session_id is unused by callers.
     let _ = resp.text().await?;
 
-    // Send notifications/initialized without a session ID. In stateless mode
-    // the server ignores notifications, so this is a no-op but keeps the MCP
-    // handshake well-formed for forward-compat.
+    // notifications/initialized is a no-op under NeverSessionManager but keeps
+    // the MCP handshake structurally well-formed for forward-compat.
     let resp = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -242,5 +237,5 @@ async fn initialize(client: &reqwest::Client, url: &str, label: &str) -> anyhow:
     if !(resp.status() == 200 || resp.status() == 202) {
         anyhow::bail!("initialized returned {}", resp.status());
     }
-    Ok(String::new())
+    Ok(())
 }

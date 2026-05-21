@@ -122,10 +122,14 @@ mod tests {
     #[tokio::test]
     async fn accepts_request_without_session_id() {
         // Stateless mode: POST to /mcp with a stale/unknown mcp-session-id header
-        // should not return 404. This is the real regression — clients that restart
-        // send their old session ID, and stateful mode returns 404 "Session not found".
-        // In stateless mode (NeverSessionManager) every request is standalone, so
-        // there is no session store to miss and the request is processed normally.
+        // should succeed. This is the real regression: clients that restart send
+        // their old session ID, and stateful mode would return 404 "Session not
+        // found". Stateless mode (NeverSessionManager) has no session store, so
+        // every request is processed normally.
+        //
+        // We send the stale header explicitly (rather than omitting it) because
+        // a sessionless request would also succeed in stateful mode (rmcp creates
+        // a fresh session). The regression is specifically about *stale* IDs.
         let s = make_server().await;
         let url = s.url();
         let client = reqwest::Client::new();
@@ -143,17 +147,16 @@ mod tests {
             .post(&url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
-            // Simulate a client restart: send a session ID that was never created.
             .header("mcp-session-id", "stale-session-from-previous-client-run")
             .json(&body)
             .send()
             .await
             .expect("request failed");
-        assert_ne!(
-            resp.status().as_u16(),
-            404,
-            "stateless mode must not 404 on stale session id; got body: {}",
-            resp.text().await.unwrap_or_default()
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+        assert!(
+            status.is_success(),
+            "expected 2xx for initialize with stale session id, got {status}; body: {body_text}"
         );
         s.shutdown();
     }
