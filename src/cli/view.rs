@@ -25,13 +25,39 @@ pub async fn run(url: String) -> Result<()> {
     let state = Arc::new(Mutex::new(AppState::new(1000)));
     let (delta_tx, delta_rx) = broadcast::channel::<StateDelta>(256);
 
-    // Stub cmd channel. T15 replaces this with an MCP-backed forwarder that
-    // sends Command::ClearFeed / Unpin / PinCard to the remote serve as MCP
-    // tool calls. For T14 we just log so keybind dispatch is observable.
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(64);
+    let mcp_url = format!("{url}/mcp");
     tokio::spawn(async move {
         while let Some(cmd) = cmd_rx.recv().await {
-            tracing::warn!(?cmd, "view: command channel not yet wired (lands in P2.T15)");
+            let result = match cmd {
+                Command::ClearFeed => {
+                    call_mcp_tool(&mcp_url, "clear_feed", serde_json::json!({})).await
+                }
+                Command::Unpin { slot } => {
+                    call_mcp_tool(&mcp_url, "unpin", serde_json::json!({"slot": slot})).await
+                }
+                Command::PinCard { card_id, slot } => {
+                    call_mcp_tool(
+                        &mcp_url,
+                        "pin_card",
+                        serde_json::json!({
+                            "card_id": card_id.0.to_string(),
+                            "slot": slot,
+                        }),
+                    )
+                    .await
+                }
+                // View never originates PushCard or SetSessionLabel — those
+                // are agent-driven. If they appear here it's a TUI bug; log
+                // and drop without forwarding.
+                Command::PushCard(_) | Command::SetSessionLabel { .. } => {
+                    tracing::warn!(?cmd, "view: unexpected command type, dropping");
+                    continue;
+                }
+            };
+            if let Err(e) = result {
+                tracing::warn!(error = %e, "view: mcp control call failed");
+            }
         }
     });
 
@@ -103,6 +129,40 @@ pub async fn run(url: String) -> Result<()> {
 
     let app = TuiApp::new(delta_rx, refresh, cmd_tx);
     app.run().await
+}
+
+/// Fire-and-forget MCP tool call against the remote serve. Returns Err on
+/// HTTP failure, but the caller usually ignores it (tools that go through
+/// here are TUI keybinds — a transient error gets logged, not surfaced to
+/// the user).
+async fn call_mcp_tool(
+    mcp_url: &str,
+    name: &str,
+    args: serde_json::Value,
+) -> Result<()> {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": { "name": name, "arguments": args }
+    });
+    let resp = reqwest::Client::new()
+        .post(mcp_url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            crate::error::Error::Io(std::io::Error::other(format!("mcp call: {e}")))
+        })?;
+    if !resp.status().is_success() {
+        return Err(crate::error::Error::Io(std::io::Error::other(format!(
+            "mcp call {name} failed: {}",
+            resp.status()
+        ))));
+    }
+    Ok(())
 }
 
 /// Best-effort delta application. Snapshot replays cards through the public
