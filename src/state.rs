@@ -4,7 +4,7 @@ use crate::card::{Card, CardId, SessionId};
 use indexmap::IndexMap;
 use std::collections::{HashMap, VecDeque};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionInfo {
     pub label: String,
     /// Stable color slot 0..=15 chosen on first sight; never changes.
@@ -21,8 +21,14 @@ pub struct AppState {
     next_color: u8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StateDelta {
+    Snapshot {
+        feed: Vec<Card>,
+        pins: Vec<(String, Card)>,
+        sessions: Vec<(SessionId, SessionInfo)>,
+    },
     CardPushed { id: CardId, in_feed: bool, pin_slot: Option<String> },
     CardEvicted { id: CardId },
     PinReplaced { slot: String },
@@ -53,6 +59,25 @@ impl AppState {
 
     pub fn sessions(&self) -> &HashMap<SessionId, SessionInfo> {
         &self.sessions
+    }
+
+    /// Build a `Snapshot` delta capturing the full current state. The /events
+    /// endpoint emits this as the first frame for new SSE subscribers so they
+    /// can hydrate without replaying every delta from session start.
+    pub fn snapshot(&self) -> StateDelta {
+        StateDelta::Snapshot {
+            feed: self.feed.iter().cloned().collect(),
+            pins: self
+                .pins
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            sessions: self
+                .sessions
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        }
     }
 
     /// Push a card. Returns deltas describing the change(s).
@@ -293,5 +318,58 @@ mod tests {
         s.push(text_card("conn-deadbeef", None, "1"));
         s.set_session_label(&"conn-deadbeef".into(), "research".into(), None);
         assert_eq!(s.sessions().get("conn-deadbeef").unwrap().label, "research");
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use crate::card::{CardKind, CommonArgs, TextFormat};
+
+    fn mk_text_card(content: &str) -> Card {
+        Card::build(
+            CommonArgs {
+                title: Some(content.to_string()),
+                session: Some("test".to_string()),
+                pin: None,
+                note: None,
+            },
+            "default".into(),
+            CardKind::Text {
+                content: content.to_string(),
+                format: TextFormat::Plain,
+                language: None,
+            },
+        )
+    }
+
+    #[test]
+    fn snapshot_captures_feed_and_pins() {
+        let mut s = AppState::new(10);
+        s.push(mk_text_card("a"));
+        s.push(mk_text_card("b"));
+        let snap = s.snapshot();
+        match snap {
+            StateDelta::Snapshot { feed, pins: _, sessions: _ } => {
+                assert_eq!(feed.len(), 2);
+            }
+            _ => panic!("expected Snapshot variant"),
+        }
+    }
+
+    #[test]
+    fn snapshot_serializes_round_trip() {
+        let s = AppState::new(10);
+        let snap = s.snapshot();
+        let json = serde_json::to_string(&snap).expect("serialize");
+        let _: StateDelta = serde_json::from_str(&json).expect("deserialize");
+    }
+
+    #[test]
+    fn snapshot_json_tag_is_snake_case() {
+        let s = AppState::new(10);
+        let snap = s.snapshot();
+        let json = serde_json::to_string(&snap).expect("serialize");
+        assert!(json.contains(r#""kind":"snapshot""#), "expected kind=snapshot in: {json}");
     }
 }
