@@ -43,15 +43,33 @@ async fn main() -> Result<()> {
 
     match args.cmd.unwrap_or(Cmd::Tui) {
         Cmd::Tui => run_tui(args.port, args.max_cards, args.image_paths).await,
-        Cmd::Serve => {
-            tracing::info!("serve subcommand not yet implemented");
-            unimplemented!("serve mode lands in P2.T9")
-        }
+        Cmd::Serve => run_serve(args.port, args.max_cards, args.image_paths).await,
         Cmd::View { url: _ } => {
             tracing::info!("view subcommand not yet implemented");
             unimplemented!("view mode lands in P2.T13")
         }
     }
+}
+
+async fn run_serve(port: u16, max_cards: usize, image_paths: Vec<PathBuf>) -> Result<()> {
+    tracing::info!(port, max_cards, "lookout starting (serve mode, headless)");
+    let handles = run_server(ServerConfig {
+        port,
+        max_cards,
+        image_paths,
+    })
+    .await?;
+
+    eprintln!("lookout serve listening on {}", handles.url);
+
+    tokio::signal::ctrl_c().await.ok();
+
+    tracing::info!("lookout shutting down");
+    handles.server.shutdown();
+    drop(handles.cmd_tx);
+    let _ = tokio::time::timeout(Duration::from_secs(2), handles.state_loop).await;
+
+    Ok(())
 }
 
 async fn run_tui(port: u16, max_cards: usize, image_paths: Vec<PathBuf>) -> Result<()> {
