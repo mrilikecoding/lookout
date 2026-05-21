@@ -109,6 +109,18 @@ impl AppState {
         deltas
     }
 
+    /// Promote a feed card to a pin slot. Returns delta(s) if the card exists;
+    /// empty vec if no card matches the id (silent no-op, matching `unpin`'s
+    /// shape for unknown slots).
+    pub fn pin_card(&mut self, card_id: CardId, slot: String) -> Vec<StateDelta> {
+        if let Some(card) = self.feed.iter().find(|c| c.id == card_id).cloned() {
+            self.pins.insert(slot.clone(), card);
+            vec![StateDelta::PinReplaced { slot }]
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn unpin(&mut self, slot: &str) -> Option<StateDelta> {
         self.pins
             .shift_remove(slot)
@@ -166,6 +178,8 @@ use tokio::sync::{broadcast, mpsc};
 pub enum Command {
     PushCard(Card),
     Unpin { slot: String },
+    /// Promote an existing feed card (by id) to a named pin slot.
+    PinCard { card_id: CardId, slot: String },
     ClearFeed,
     SetSessionLabel {
         session: SessionId,
@@ -184,6 +198,7 @@ pub async fn state_task(
         let new_deltas = match cmd {
             Command::PushCard(card) => state.push(card),
             Command::Unpin { slot } => state.unpin(&slot).into_iter().collect(),
+            Command::PinCard { card_id, slot } => state.pin_card(card_id, slot),
             Command::ClearFeed => vec![state.clear_feed()],
             Command::SetSessionLabel { session, label, color } => {
                 vec![state.set_session_label(&session, label, color)]
@@ -397,5 +412,25 @@ mod snapshot_tests {
             let _: StateDelta = serde_json::from_str(&j)
                 .unwrap_or_else(|e| panic!("deserialize failed for {j}: {e}"));
         }
+    }
+
+    #[test]
+    fn pin_card_promotes_feed_card_to_slot() {
+        let mut s = AppState::new(10);
+        let card = mk_text_card("hi");
+        let id = card.id;
+        s.push(card);
+        let deltas = s.pin_card(id, "watch".to_string());
+        assert!(matches!(deltas.first(), Some(StateDelta::PinReplaced { slot }) if slot == "watch"));
+        assert!(s.pins().contains_key("watch"));
+    }
+
+    #[test]
+    fn pin_card_no_op_for_unknown_id() {
+        let mut s = AppState::new(10);
+        let bogus = crate::card::CardId(uuid::Uuid::new_v4());
+        let deltas = s.pin_card(bogus, "watch".to_string());
+        assert!(deltas.is_empty());
+        assert!(s.pins().is_empty());
     }
 }

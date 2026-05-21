@@ -125,6 +125,7 @@ mod tests {
                     match cmd {
                         Command::PushCard(card) => s.push(card),
                         Command::Unpin { slot } => s.unpin(&slot).into_iter().collect(),
+                        Command::PinCard { card_id, slot } => s.pin_card(card_id, slot),
                         Command::ClearFeed => vec![s.clear_feed()],
                         Command::SetSessionLabel {
                             session,

@@ -370,6 +370,14 @@ pub struct UnpinArgs {
 pub struct ClearFeedArgs {}
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct PinCardArgs {
+    /// UUID of an existing feed card to promote.
+    pub card_id: String,
+    /// Pin slot name to bind the card to (replaces any existing card in the slot).
+    pub slot: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct SetSessionLabelArgs {
     /// Session ID to label.
     pub session: String,
@@ -900,6 +908,30 @@ impl LookoutServer {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         self.cmds
             .try_send(Command::Unpin { slot: args.slot.clone() })
+            .map_err(|e| match e {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    ErrorData::internal_error("lookout overloaded", None)
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    ErrorData::internal_error("state task closed", None)
+                }
+            })?;
+        Ok(CallToolResult::success(vec![rmcp::model::Content::text(
+            format!("ok:{}", args.slot),
+        )]))
+    }
+
+    /// Promote an existing feed card (by id) to a named pin slot.
+    #[tool(description = "Promote an existing feed card (by id) to a named pin slot. Replaces any existing card in the slot.")]
+    pub async fn pin_card(
+        &self,
+        Parameters(args): Parameters<PinCardArgs>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let uuid = uuid::Uuid::parse_str(&args.card_id)
+            .map_err(|e| ErrorData::invalid_params(format!("bad card_id: {e}"), None))?;
+        let card_id = crate::card::CardId(uuid);
+        self.cmds
+            .try_send(Command::PinCard { card_id, slot: args.slot.clone() })
             .map_err(|e| match e {
                 tokio::sync::mpsc::error::TrySendError::Full(_) => {
                     ErrorData::internal_error("lookout overloaded", None)
