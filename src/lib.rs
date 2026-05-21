@@ -1,4 +1,5 @@
 pub mod card;
+pub mod cli;
 pub mod error;
 pub mod imagepaths;
 pub mod logging;

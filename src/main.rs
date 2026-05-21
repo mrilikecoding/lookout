@@ -44,10 +44,7 @@ async fn main() -> Result<()> {
     match args.cmd.unwrap_or(Cmd::Tui) {
         Cmd::Tui => run_tui(args.port, args.max_cards, args.image_paths).await,
         Cmd::Serve => run_serve(args.port, args.max_cards, args.image_paths).await,
-        Cmd::View { url: _ } => {
-            tracing::info!("view subcommand not yet implemented");
-            unimplemented!("view mode lands in P2.T13")
-        }
+        Cmd::View { url } => lookout::cli::view::run(url).await,
     }
 }
 
